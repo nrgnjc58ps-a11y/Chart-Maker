@@ -1,7 +1,7 @@
 import * as store from './store.js';
 import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
-import { renderSong, renderSetlist, pagesToPdf, loadFonts, PAPER } from './render.js';
+import { renderSong, pagesToPdf, loadFonts, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -111,19 +111,13 @@ function route() {
   const parts = (currentPath.replace(/^\/?/, '') || '').split('/');
   window.scrollTo(0, 0);
   if (parts[0] === 'song' && store.findSong(parts[1])) return viewSong(store.findSong(parts[1]));
-  if (parts[0] === 'gig' && store.findGig(parts[1])) return viewGig(store.findGig(parts[1]));
-  if (parts[0] === 'gigs') return viewGigs();
   return viewSongs();
 }
 if (!ARTIFACT) window.addEventListener('hashchange', route);
 
 // ---------- home: songs ----------
-function homeTabs(active) {
-  return `<nav class="tabs"><a href="#/" class="${active === 'songs' ? 'on' : ''}">Songs (${state.songs.length})</a><a href="#/gigs" class="${active === 'gigs' ? 'on' : ''}">Gigs (${state.gigs.length})</a></nav>`;
-}
-
-// Select mode on the Songs / Gigs lists (for deleting several at once).
-let selecting = null; // 'songs' | 'gigs' | null
+// Select mode on the song list (for deleting several at once).
+let selecting = null; // 'songs' | null
 const selected = new Set();
 
 function selectBar(kind) {
@@ -137,10 +131,10 @@ function selectBar(kind) {
 
 function listTopbar(kind) {
   const isSel = selecting === kind;
-  const has = kind === 'songs' ? state.songs.length : state.gigs.length;
+  const has = state.songs.length;
   const sel = has ? `<button class="tbtn" data-act="${isSel ? 'select-done' : 'select-start'}" data-kind="${kind}">${isSel ? 'Done' : 'Select'}</button>` : '';
-  const add = isSel ? '' : (kind === 'songs' ? '<button class="tbtn primary" data-act="new-song">+ New song</button>' : '<button class="tbtn primary" data-act="new-gig">+ New gig</button>');
-  topbar({ left: sel, right: add });
+  const add = isSel ? '' : '<button class="tbtn icon-btn" data-act="settings" aria-label="Settings and backup">⚙︎</button><button class="tbtn primary" data-act="new-song">+ New</button>';
+  topbar({ title: isSel ? `${selected.size} selected` : 'Charts', left: sel, right: add });
 }
 
 function viewSongs(filter = '') {
@@ -148,12 +142,11 @@ function viewSongs(filter = '') {
   listTopbar('songs');
   const songs = [...state.songs].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   app.innerHTML = `
-    ${homeTabs('songs')}
-    <div class="card">
-      <input type="search" id="song-search" placeholder="Search songs" value="${esc(filter)}" ${NO_AUTO}>
-      <ul class="list" id="song-list" style="margin-top:8px"></ul>
-    </div>
-    ${selecting === 'songs' ? selectBar('songs') : settingsCard()}`;
+    <div class="home">
+      ${state.songs.length > 6 || filter ? `<input type="search" id="song-search" class="search" placeholder="Search ${state.songs.length} songs" value="${esc(filter)}" ${NO_AUTO}>` : ''}
+      <ul class="list song-list" id="song-list"></ul>
+      ${selecting === 'songs' ? selectBar('songs') : ''}
+    </div>`;
   const list = $('#song-list');
   const draw = (q) => {
     const ql = q.trim().toLowerCase();
@@ -163,12 +156,11 @@ function viewSongs(filter = '') {
         <span class="pill">${esc(transposeKeyName(s.key, s.transpose || 0))}</span>`;
     list.innerHTML = shown.length ? shown.map((s) => (selecting === 'songs'
       ? `<li><label class="list-item select-row"><input type="checkbox" data-select="${s.id}" ${selected.has(s.id) ? 'checked' : ''}>${row(s)}</label></li>`
-      : `<li><a class="list-item" href="#/song/${s.id}">${row(s)}</a></li>`)).join('')
+      : `<li><a class="list-item" href="#/song/${s.id}">${row(s)}<span class="chev" aria-hidden="true">›</span></a></li>`)).join('')
       : (state.songs.length ? '<li class="empty">No songs match.</li>' : `<li class="empty">No songs yet. Tap “+ New song”, or start from an example chart.<br><button class="btn" data-act="add-example" style="margin-top:10px">Add example: Shape of a Heart</button></li>`);
   };
   draw(filter);
-  $('#song-search').addEventListener('input', (e) => draw(e.target.value));
-  bindSettings();
+  $('#song-search')?.addEventListener('input', (e) => draw(e.target.value));
 }
 
 app.addEventListener('change', (e) => {
@@ -177,6 +169,7 @@ app.addEventListener('change', (e) => {
   e.target.checked ? selected.add(id) : selected.delete(id);
   const bar = $('.select-bar');
   if (bar) bar.outerHTML = selectBar(selecting);
+  $('#top-title').textContent = `${selected.size} selected`;
 });
 
 function gigsUsing(songIds) {
@@ -187,35 +180,19 @@ function gigsUsing(songIds) {
 async function deleteSongs(ids) {
   if (!ids.length) return false;
   const names = ids.map((id) => store.findSong(id)?.title || 'Untitled');
-  const gigs = gigsUsing(ids);
   const what = ids.length === 1 ? `“${names[0]}”` : `${ids.length} songs`;
-  const inGigs = ids.filter((id) => gigs.some((g) => g.items.some((it) => it.songId === id))).length;
-  const who = ids.length === 1 ? 'It’s' : inGigs === ids.length ? 'They’re' : `${inGigs} of them ${inGigs === 1 ? 'is' : 'are'}`;
-  const gigNote = gigs.length ? ` ${who} in ${gigs.length} gig${gigs.length === 1 ? '' : 's'} (${gigs.map((g) => g.name || 'Untitled').slice(0, 3).join(', ')}${gigs.length > 3 ? '…' : ''}) and will be taken off ${gigs.length === 1 ? 'that setlist' : 'those setlists'}.` : '';
-  const ok = await askConfirm(`Delete ${what}?${gigNote} This can’t be undone.`, ids.length === 1 ? 'Delete song' : `Delete ${ids.length} songs`);
+  const ok = await askConfirm(`Delete ${what}? This can’t be undone.`, ids.length === 1 ? 'Delete song' : `Delete ${ids.length} songs`);
   if (!ok) return false;
   state.songs = state.songs.filter((s) => !ids.includes(s.id));
-  gigs.forEach((g) => { g.items = g.items.filter((it) => !ids.includes(it.songId)); });
+  gigsUsing(ids).forEach((g) => { g.items = g.items.filter((it) => !ids.includes(it.songId)); });
   store.save(true);
   toast(ids.length === 1 ? `Deleted “${names[0]}”` : `Deleted ${ids.length} songs`);
   return true;
 }
 
-async function deleteGigs(ids) {
-  if (!ids.length) return false;
-  const what = ids.length === 1 ? `the gig “${store.findGig(ids[0])?.name || 'Untitled'}”` : `${ids.length} gigs`;
-  const ok = await askConfirm(`Delete ${what}? The songs stay in your library.`, ids.length === 1 ? 'Delete gig' : `Delete ${ids.length} gigs`);
-  if (!ok) return false;
-  state.gigs = state.gigs.filter((g) => !ids.includes(g.id));
-  store.save(true);
-  toast(ids.length === 1 ? 'Gig deleted' : `Deleted ${ids.length} gigs`);
-  return true;
-}
-
-function settingsCard() {
-  return `
-    <div class="card">
-      <h2>Settings &amp; backup</h2>
+function settingsSheet() {
+  const sheet = openModal(`
+      <h3>Settings &amp; backup</h3>
       <div class="row">
         <label class="field">Paper size
           <select id="paper">${Object.entries(PAPER).map(([k, p]) => `<option value="${k}" ${state.prefs.paper === k ? 'selected' : ''}>${p.label}</option>`).join('')}</select>
@@ -228,7 +205,9 @@ function settingsCard() {
         <button class="btn" data-act="backup">Save backup file</button>
         <label class="btn">Restore backup<input type="file" id="restore" accept=".json,application/json" hidden></label>
       </div>
-    </div>`;
+      <div class="actions"><button class="btn" data-m="close">Done</button></div>`);
+  sheet.addEventListener('click', (e) => { if (e.target.dataset.m === 'close') closeModal(); });
+  bindSettings();
 }
 
 function bindSettings() {
@@ -238,7 +217,7 @@ function bindSettings() {
     if (!f) return;
     try {
       const r = store.importBackup(await f.text());
-      toast(`Restored ${r.songs} song${r.songs === 1 ? '' : 's'} and ${r.gigs} gig${r.gigs === 1 ? '' : 's'}`);
+      closeModal(); toast(`Restored ${r.songs} song${r.songs === 1 ? '' : 's'}`);
       route();
     } catch {
       toast('That file isn’t a Chart Maker backup.');
@@ -462,134 +441,8 @@ function currentSong() {
   const m = /^\/song\/(.+)$/.exec(currentPath);
   return m ? store.findSong(m[1]) : null;
 }
-function currentGig() {
-  const m = /^\/gig\/(.+)$/.exec(currentPath);
-  return m ? store.findGig(m[1]) : null;
-}
-
-// ---------- gigs ----------
-function viewGigs() {
-  if (selecting !== 'gigs') { selecting = null; selected.clear(); }
-  listTopbar('gigs');
-  const gigs = [...state.gigs].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const row = (g) => `
-        <div class="grow"><div class="title">${esc(g.name || 'Untitled gig')}</div><div class="meta">${esc([g.date, g.venue].filter(Boolean).join(' · '))}</div></div>
-        <span class="pill">${g.items.length} song${g.items.length === 1 ? '' : 's'}</span>`;
-  app.innerHTML = `
-    ${homeTabs('gigs')}
-    <div class="card"><ul class="list">${gigs.length ? gigs.map((g) => (selecting === 'gigs'
-      ? `<li><label class="list-item select-row"><input type="checkbox" data-select="${g.id}" ${selected.has(g.id) ? 'checked' : ''}>${row(g)}</label></li>`
-      : `<li><a class="list-item" href="#/gig/${g.id}">${row(g)}</a></li>`)).join('') : '<li class="empty">No gigs yet. Tap “+ New gig” to build a setlist and print every chart in one PDF.</li>'}
-    </ul></div>
-    ${selecting === 'gigs' ? selectBar('gigs') : settingsCard()}`;
-  bindSettings();
-}
-
-function gigItemKey(item) {
-  const song = store.findSong(item.songId);
-  if (!song) return { song: null, steps: 0, key: '?' };
-  const steps = item.transpose ?? (song.transpose || 0);
-  return { song, steps, key: transposeKeyName(song.key, steps) };
-}
-
-function viewGig(gig) {
-  topbar({
-    title: gig.name || 'Gig',
-    left: '<a class="tbtn" href="#/gigs">‹ Gigs</a>',
-    right: `${ARTIFACT ? '' : '<button class="tbtn" data-act="gig-print">Print</button>'}<button class="tbtn primary" data-act="gig-pdf">PDF</button>`,
-  });
-  app.innerHTML = `
-    <div style="max-width:760px;margin:0 auto">
-    <div class="card">
-      <h2>Gig</h2>
-      <div class="row"><label class="field">Name<input type="text" data-gig="name" value="${esc(gig.name)}" placeholder="e.g. Smith wedding" autocomplete="off"></label></div>
-      <div class="row" style="margin-top:8px">
-        <label class="field">Date<input type="date" data-gig="date" value="${esc(gig.date)}"></label>
-        <label class="field">Venue<input type="text" data-gig="venue" value="${esc(gig.venue)}" autocomplete="off"></label>
-      </div>
-      <div class="row" style="margin-top:8px"><label class="field">Notes (printed on the setlist)<input type="text" data-gig="notes" value="${esc(gig.notes)}" autocomplete="off"></label></div>
-      <label class="check" style="margin-top:6px"><input type="checkbox" data-gig="setlistPage" ${gig.setlistPage !== false ? 'checked' : ''}> Put a setlist page at the front of the PDF</label>
-    </div>
-    <div class="card">
-      <h2>Setlist</h2>
-      <div id="gig-items">${gigItems(gig)}</div>
-      <div class="row" style="margin-top:10px"><button class="btn primary grow" data-act="gig-add">+ Add songs</button></div>
-      <p class="small muted">Transposing here only changes the key for this gig — the song itself stays as it is.</p>
-    </div>
-    <div class="row"><span class="grow"></span><button class="btn danger" data-act="gig-del">Delete gig</button></div>
-    </div>`;
-}
-
-function gigItems(gig) {
-  if (!gig.items.length) return '<p class="empty">No songs yet.</p>';
-  return gig.items.map((item, i) => {
-    const { song, steps, key } = gigItemKey(item);
-    return `<div class="gig-item">
-      <span class="n">${i + 1}</span>
-      <div class="t">${song ? `<a href="#/song/${song.id}">${esc(song.title || 'Untitled')}</a>` : '<span class="muted">(deleted song)</span>'}<div class="k muted">${steps ? stepsLabel(steps) : 'Song’s key'}</div></div>
-      <div class="stepper"><button data-act="gi-down" data-i="${i}" aria-label="Transpose down">−</button><span>${esc(key)}</span><button data-act="gi-up" data-i="${i}" aria-label="Transpose up">+</button></div>
-      <button class="btn small icon" data-act="gi-moveup" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
-      <button class="btn small icon" data-act="gi-movedown" data-i="${i}" ${i === gig.items.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
-      <button class="btn small icon danger" data-act="gi-del" data-i="${i}" aria-label="Remove">✕</button>
-    </div>`;
-  }).join('');
-}
-
-const onGigField = (e) => {
-  const gig = currentGig();
-  const f = e.target.dataset.gig;
-  if (!gig || !f) return;
-  if ((e.target.type === 'checkbox') !== (e.type === 'change')) return;
-  gig[f] = e.target.type === 'checkbox' ? e.target.checked : e.target.value;
-  if (f === 'name') $('#top-title').textContent = gig.name || 'Gig';
-  store.save();
-};
-app.addEventListener('input', onGigField);
-app.addEventListener('change', onGigField);
-
-function gigAddSheet(gig) {
-  const songs = [...state.songs].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
-  const sheet = openModal(`
-    <h3>Add songs to “${esc(gig.name || 'gig')}”</h3>
-    <input type="search" id="add-search" placeholder="Search" ${NO_AUTO}>
-    <div id="add-list" style="margin-top:8px"></div>
-    <div class="actions"><button class="btn primary" data-m="add">Add selected</button><button class="btn" data-m="close">Cancel</button></div>`);
-  const chosen = new Set();
-  const draw = (q = '') => {
-    const ql = q.toLowerCase();
-    $('#add-list', sheet).innerHTML = songs.filter((s) => !ql || (s.title || '').toLowerCase().includes(ql)).map((s) => `
-      <label class="check" style="display:flex"><input type="checkbox" value="${s.id}" ${chosen.has(s.id) ? 'checked' : ''}> <span class="grow">${esc(s.title || 'Untitled')}</span> <span class="pill">${esc(transposeKeyName(s.key, s.transpose || 0))}</span></label>`).join('') || '<p class="empty">No songs in your library yet.</p>';
-  };
-  draw();
-  $('#add-search', sheet).addEventListener('input', (e) => draw(e.target.value));
-  sheet.addEventListener('change', (e) => { if (e.target.type === 'checkbox') e.target.checked ? chosen.add(e.target.value) : chosen.delete(e.target.value); });
-  sheet.addEventListener('click', (e) => {
-    const m = e.target.dataset.m;
-    if (m === 'close') closeModal();
-    if (m === 'add') {
-      // Keep library order of selection as alphabetical; user can reorder after.
-      songs.filter((s) => chosen.has(s.id)).forEach((s) => gig.items.push({ songId: s.id, transpose: null }));
-      store.save();
-      closeModal();
-      $('#gig-items').innerHTML = gigItems(gig);
-    }
-  });
-}
 
 // ---------- PDF / print ----------
-function gigPages(gig) {
-  const pages = [];
-  const rows = [];
-  gig.items.forEach((item) => {
-    const { song, steps, key } = gigItemKey(item);
-    if (!song) return;
-    rows.push({ title: song.title, key, tempo: song.tempo });
-    pages.push(...renderSong(song, { paper: state.prefs.paper, transpose: steps }).pages);
-  });
-  if (gig.setlistPage !== false) pages.unshift(renderSetlist(gig, rows, state.prefs.paper));
-  return pages;
-}
-
 async function makePdf(getPages, name) {
   const sheet = openModal(`<h3>Making PDF…</h3><div class="spinner"></div><p class="muted small" id="pdf-progress" style="text-align:center">Preparing pages</p>`);
   try {
@@ -649,7 +502,6 @@ document.addEventListener('click', (e) => {
   if (!btn || btn.disabled) return;
   const act = btn.dataset.act;
   const song = currentSong();
-  const gig = currentGig();
   const i = +btn.dataset.i;
 
   switch (act) {
@@ -665,13 +517,6 @@ document.addEventListener('click', (e) => {
       state.songs.push(store.exampleSong());
       store.save(true);
       route();
-      break;
-    }
-    case 'new-gig': {
-      const g = { id: store.uid(), name: '', date: new Date().toISOString().slice(0, 10), venue: '', notes: '', setlistPage: true, items: [] };
-      state.gigs.push(g);
-      store.save(true);
-      navigate(`/gig/${g.id}`);
       break;
     }
     case 'backup': {
@@ -763,41 +608,6 @@ document.addEventListener('click', (e) => {
       });
       break;
     }
-    // gig
-    case 'gig-add': gigAddSheet(gig); break;
-    case 'gi-up': case 'gi-down': {
-      const item = gig.items[i];
-      const { song: s } = gigItemKey(item);
-      if (!s) break;
-      const cur = item.transpose ?? (s.transpose || 0);
-      item.transpose = wrapSteps(cur + (act === 'gi-up' ? 1 : -1));
-      store.save();
-      $('#gig-items').innerHTML = gigItems(gig);
-      break;
-    }
-    case 'gi-moveup': case 'gi-movedown': {
-      const j = act === 'gi-moveup' ? i - 1 : i + 1;
-      [gig.items[i], gig.items[j]] = [gig.items[j], gig.items[i]];
-      store.save();
-      $('#gig-items').innerHTML = gigItems(gig);
-      break;
-    }
-    case 'gi-del':
-      gig.items.splice(i, 1);
-      store.save();
-      $('#gig-items').innerHTML = gigItems(gig);
-      break;
-    case 'gig-pdf':
-      if (!gig.items.length) { toast('Add some songs first.'); break; }
-      makePdf(() => gigPages(gig), gig.name || 'Gig');
-      break;
-    case 'gig-print':
-      if (!gig.items.length) { toast('Add some songs first.'); break; }
-      printPages(gigPages(gig));
-      break;
-    case 'gig-del':
-      deleteGigs([gig.id]).then((ok) => ok && navigate('/gigs'));
-      break;
     case 'song-del':
       deleteSongs([song.id]).then((ok) => ok && navigate('/'));
       break;
@@ -807,8 +617,9 @@ document.addEventListener('click', (e) => {
     case 'select-done':
       selecting = null; selected.clear(); route();
       break;
+    case 'settings': settingsSheet(); break;
     case 'select-all': {
-      const ids = (btn.dataset.kind === 'songs' ? state.songs : state.gigs).map((x) => x.id);
+      const ids = state.songs.map((x) => x.id);
       const all = ids.every((id) => selected.has(id));
       ids.forEach((id) => (all ? selected.delete(id) : selected.add(id)));
       route();
@@ -816,10 +627,10 @@ document.addEventListener('click', (e) => {
     }
     case 'delete-selected': {
       const ids = [...selected];
-      (btn.dataset.kind === 'songs' ? deleteSongs(ids) : deleteGigs(ids)).then((ok) => {
+      deleteSongs(ids).then((ok) => {
         if (!ok) return;
         selected.clear();
-        if (!(btn.dataset.kind === 'songs' ? state.songs.length : state.gigs.length)) selecting = null;
+        if (!state.songs.length) selecting = null;
         route();
       });
       break;

@@ -64,6 +64,7 @@ export function roots(key) {
 
 const pretty = prettyChord;
 const MODS = ['m', '7', 'maj7', 'm7b5', 'dim7', '5', 'sus4', 'sus2', '7sus4', 'add9', '6', '9', 'dim', 'aug'];
+const ALTS = ['b5', '#5', 'b9', '#9', '#11', 'b13', 'alt'];
 const SHORT_LABEL = { m: '-', maj7: 'Δ7', m7b5: 'ø7', dim7: '°7', dim: '°', aug: '+' };
 
 // ---------------------------------------------------------------- editing
@@ -108,6 +109,18 @@ function addModifier(field, mod) {
   if (!m) return false;
   let quality = m[2];
   const isMinor = quality.startsWith('m') && !quality.startsWith('maj');
+  if (ALTS.includes(mod)) {
+    // Alterations add on (G7 → G7♭9 → G7♭9♯11); tap again to take one off.
+    if (mod === 'alt') quality = /alt$/.test(quality) ? quality.replace(/alt$/, '') || '7' : (isMinor ? 'm7' : '7') + 'alt';
+    else if (quality.includes(mod)) quality = quality.replace(mod, '');
+    else {
+      quality = quality.replace(/alt$/, '');
+      if (!/(7|9|11|13)/.test(quality)) quality += '7';
+      quality += mod;
+    }
+    put(field, before.slice(0, before.length - m[0].length) + m[1] + quality, after);
+    return true;
+  }
   if (mod === 'm') quality = isMinor ? '' : 'm'; // toggle minor
   else if (['7', '9', '6', 'add9'].includes(mod)) quality = (isMinor ? 'm' : '') + mod; // keep minor: Am → Am7
   else quality = mod; // sus4, maj7, m7, dim… replace
@@ -172,6 +185,7 @@ function draw() {
     <div class="pk-label">In ${pretty(key)}</div>
     <div class="pk-row pk-key">${diatonic.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord')).join('')}</div>
     <div class="pk-row pk-key">${extra.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}</div>
+    <div class="pk-row pk-alt">${ALTS.map((m) => btn(m === 'alt' ? 'alt' : pretty(m), 'mod', m)).join('')}</div>
     <div class="pk-row pk-mods">${MODS.map((m) => btn(modLabel(m), 'mod', m)).join('')}${btn('&lt;', 'tok', '<', 'cresc')}${btn('N.C.', 'tok', 'N.C.')}</div>
     <div class="pk-row pk-roots">${roots(key).map((r) => btn(pretty(r), 'chord', r, '', 'pk-root')).join('')}</div>`;
 }

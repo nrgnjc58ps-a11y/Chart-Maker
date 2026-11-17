@@ -226,3 +226,14 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
   padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 14px rgba(0,0,0,.1);
 }
 .btn.danger-fill:disabled { opacity: .45; }
+
+/* Home: one clean list */
+.home { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 10px; }
+.home .search { border-radius: 12px; }
+.song-list { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 0 14px; }
+.song-list .list-item { min-height: 64px; padding: 12px 2px; }
+.song-list .title { font-size: 17px; }
+.chev { color: var(--muted); font-size: 24px; line-height: 1; margin-left: 2px; }
+.topbar .icon-btn { font-size: 20px; padding: 6px 10px; }
+.pk-alt .pk { font-size: 14px; min-height: 32px; }
+.pk-done { font-size: 14px; }

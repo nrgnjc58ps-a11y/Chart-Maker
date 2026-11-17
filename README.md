@@ -1,6 +1,6 @@
 # Chart Maker
 
-A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Type the chords for each section, and it draws a proper slash-notation chart. Charts are in the style of a session chart: repeats, 1st/2nd endings, segno/coda, accents, hairpins, and the odd bar of real notation. You can transpose a chart to any key, build a setlist for a gig, and export everything as one PDF.
+A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Type the chords for each section, and it draws a proper slash-notation chart. Charts are in the style of a session chart: repeats, 1st/2nd endings, segno/coda, accents, hairpins, and the odd bar of real notation. You can transpose a chart to any key and export it as a PDF.
 
 ## Using it
 
@@ -18,10 +18,10 @@ A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Typ
   | `A {e2 f g a4}` | a bar of real notation (ABC notes, eighth note = 1) |
 
   Each section has options for repeat, "play × times", 1st/2nd endings, a note under the first bar, bars per line, and "start on a new page".
-- **Chord pad:** tap into a chord box and a pad appears with `|` for bar lines, the chords in the song's key (with roman numerals), common outside chords (♭VII, II, iv…), chord types (7, m7, sus4… tap again to undo), `/` for slash chords, and all 12 roots for anything else. On phones the keyboard stays hidden; tap ⌨ to type instead.
+- **Chord pad:** includes an altered row (♭5 ♯5 ♭9 ♯9 ♯11 ♭13 alt) that adds onto the chord you just tapped (G7 → G7♭9).
+- **Chord pad (all):** tap into a chord box and a pad appears with `|` for bar lines, the chords in the song's key (with roman numerals), common outside chords (♭VII, II, iv…), chord types (7, m7, sus4… tap again to undo), `/` for slash chords, and all 12 roots for anything else. On phones the keyboard stays hidden; tap ⌨ to type instead.
 - **Chord symbols:** choose Standard (Cmaj7, Cm7, Cm7♭5) or Shorthand (CΔ7, C-7, Cø7, C°7, C+) per song. Either style can be typed (`CM7`, `Cmaj7`, `CΔ7` = maj7; `CM`, `Cmaj`, `CΔ` = major; `Cmin`, `C-` = minor; `Cø`; `C°`; `C+`, `C+5`; `C5` power chord) and prints in the chosen style.
 - **Transpose** with the − / + buttons. The key signature, chords and any written notes all move.
-- **Gigs → + New gig.** Add songs, put them in order, and transpose any song for that gig only. **PDF** makes one file with a setlist page and every chart.
 - **PDF** → *Share / Save to Files / Print*, or use **Print** directly.
 
 ## Your data

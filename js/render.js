@@ -283,46 +283,6 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
   return { pages, warnings, abc, key: transposeKeyName(song.key, steps) };
 }
 
-function niceDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso + 'T12:00:00');
-  return isNaN(d) ? iso : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
-}
-
-// A simple printed setlist page for a gig.
-export function renderSetlist(gig, songs, paperName = 'letter') {
-  const paper = PAPER[paperName] || PAPER.letter;
-  const svg = newPage(paper);
-  const hand = '"Chart Hand", sans-serif';
-  let y = MARGIN + 40;
-  svg.appendChild(el('text', { x: paper.w / 2, y, 'text-anchor': 'middle', 'font-family': '"Chart Title", serif', 'font-weight': 'bold', 'font-size': 34, fill: '#000' }, gig.name || 'Setlist'));
-  y += 30;
-  const sub = [niceDate(gig.date), gig.venue].filter(Boolean).join('  ·  ');
-  if (sub) {
-    svg.appendChild(el('text', { x: paper.w / 2, y, 'text-anchor': 'middle', 'font-family': hand, 'font-size': 18, fill: '#333' }, sub));
-    y += 20;
-  }
-  y += 30;
-  const rows = songs.length;
-  const rowH = Math.max(24, Math.min(44, (paper.h - y - MARGIN - (gig.notes ? 60 : 0)) / Math.max(1, rows)));
-  const size = Math.min(30, rowH * 0.72);
-  songs.forEach((item, i) => {
-    const yy = y + rowH * (i + 0.75);
-    svg.appendChild(el('text', { x: MARGIN + 30, y: yy, 'text-anchor': 'end', 'font-family': hand, 'font-size': size, fill: '#666' }, `${i + 1}.`));
-    svg.appendChild(el('text', { x: MARGIN + 44, y: yy, 'font-family': hand, 'font-size': size, fill: '#000' }, item.title || 'Untitled'));
-    // Key in the chord font (the small-caps font would turn "Ab" into "AB").
-    const info = el('text', { x: paper.w - MARGIN, y: yy, 'text-anchor': 'end', 'font-size': size * 0.8, fill: '#333' });
-    info.appendChild(el('tspan', { 'font-family': '"Chart Chord", sans-serif' }, prettyChord(item.key)));
-    if (item.tempo) info.appendChild(el('tspan', { 'font-family': hand, dx: 14 }, `${item.tempo} bpm`));
-    svg.appendChild(info);
-    svg.appendChild(el('line', { x1: MARGIN, x2: paper.w - MARGIN, y1: y + rowH * (i + 1), y2: y + rowH * (i + 1), stroke: '#ddd', 'stroke-width': 1 }));
-  });
-  if (gig.notes) {
-    svg.appendChild(el('text', { x: MARGIN, y: paper.h - MARGIN - 10, 'font-family': hand, 'font-size': 16, fill: '#333' }, gig.notes.slice(0, 120)));
-  }
-  return svg;
-}
-
 // ---------- PDF ----------
 let fontCss;
 async function embeddedFontCss() {
@@ -357,17 +317,21 @@ async function pageToJpeg(svg, paper, scale) {
   clone.setAttribute('height', paper.h);
   const xml = new XMLSerializer().serializeToString(clone);
   const url = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(xml);
-  const img = await loadImage(url);
-  if (img.decode) await img.decode().catch(() => {});
-  // Safari sometimes needs a moment before web fonts inside an SVG image are ready.
-  await new Promise((r) => setTimeout(r, 60));
   const canvas = document.createElement('canvas');
   canvas.width = Math.round(paper.w * scale);
   canvas.height = Math.round(paper.h * scale);
   const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#fff';
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  // Safari (iPhone/iPad) can draw an SVG image before the fonts embedded in it
+  // have loaded, giving the wrong lettering. Draw once to warm it up, wait,
+  // then draw a fresh copy over the top.
+  for (const wait of [250, 120]) {
+    const img = await loadImage(url);
+    if (img.decode) await img.decode().catch(() => {});
+    await new Promise((r) => setTimeout(r, wait));
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  }
   const data = canvas.toDataURL('image/jpeg', 0.92);
   canvas.width = canvas.height = 0; // free memory (important on iPhone)
   return data;
