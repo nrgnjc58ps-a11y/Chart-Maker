@@ -3,6 +3,7 @@ import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, resolve
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
 import { renderSong, pagesToPdf, loadFonts, setChordSize, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
+import { LAYOUTS } from './layout.js';
 import { photoImportAvailable, readChartImages, prepareFiles, errorText, imageTypes, maxImages } from './photo.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -354,6 +355,10 @@ function drawEditPane(song) {
         <label class="field">Chord symbols<select data-song="chordStyle">${Object.entries(CHORD_STYLES).map(([k, v]) => `<option value="${k}" ${(song.chordStyle || 'short') === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
       </div>
       <div class="row" style="margin-top:8px">
+        <label class="field">Layout<select data-song="layout">${Object.entries(LAYOUTS).map(([k, v]) => `<option value="${k}" ${(song.layout || 'full') === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+      </div>
+      <p class="small muted" style="margin:6px 0 0">Type the song in playing order. <b>Form + sections</b> prints the order at the top and each different part once; <b>Compact</b> joins repeats and uses one D.C./D.S. jump when it saves space. Your sections stay as typed.</p>
+      <div class="row" style="margin-top:8px">
         <label class="field">Chart lettering<select data-song="style">${Object.entries(FONT_STYLES).map(([k, f]) => `<option value="${k}" ${song.style === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label>
       </div>
     </div>
@@ -514,7 +519,7 @@ function renderPreview(song, immediate = true) {
       w.appendChild(p);
       pagesEl.appendChild(w);
     });
-    $('#preview-info').textContent = `Key of ${res.key} · ${res.pages.length} page${res.pages.length === 1 ? '' : 's'} · ${PAPER[state.prefs.paper].label}`;
+    $('#preview-info').innerHTML = `${esc(`Key of ${res.key} · ${res.pages.length} page${res.pages.length === 1 ? '' : 's'} · ${PAPER[state.prefs.paper].label}`)}${res.layoutNote ? `<br>${esc(res.layoutNote)}` : ''}`;
     const warn = $('#warnings');
     if (warn) warn.innerHTML = res.warnings.length ? `<div class="warn">${res.warnings.slice(0, 6).map(esc).join('<br>')}</div>` : '';
   };

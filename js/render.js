@@ -1,4 +1,5 @@
 // Engraves songs with abcjs, lays the lines out on pages, and exports PDFs.
+import { arrangeSong } from './layout.js';
 import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FILL_MARK, TIMES_MARK, FONT_STYLES } from './abcgen.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
@@ -72,6 +73,30 @@ function box(node) {
   } catch {
     return null;
   }
+}
+
+// "FORM: Intro – Verse – Chorus …" wrapped to the page width, drawn under the title.
+function formLine(text, width, tf) {
+  const size = 20, lead = size * 1.4;
+  const font = `${size}px ${tf.family}`;
+  const ctx = document.createElement('canvas').getContext('2d');
+  ctx.font = `bold ${font}`;
+  const labelW = ctx.measureText('FORM  ').width;
+  ctx.font = font;
+  const items = text.split('  –  ');
+  const rows = [];
+  let row = '', avail = width - labelW - 4;
+  items.forEach((it, i) => {
+    const piece = i < items.length - 1 ? `${it}  –  ` : it;
+    if (row && ctx.measureText(row + piece).width > avail) { rows.push(row.trimEnd()); row = ''; }
+    row += piece;
+  });
+  if (row) rows.push(row);
+  const h = Math.ceil(rows.length * lead + 14);
+  const svg = el('svg', { xmlns: 'http://www.w3.org/2000/svg', width, height: h, viewBox: `0 0 ${width} ${h}` });
+  svg.appendChild(el('text', { x: 0, y: size + 2, 'font-family': tf.family, 'font-size': size, 'font-weight': 'bold', fill: '#000' }, 'FORM'));
+  rows.forEach((r, i) => svg.appendChild(el('text', { x: labelW, y: size + 2 + i * lead, 'font-family': tf.family, 'font-size': size, fill: '#000' }, r)));
+  return { svg, w: width, fullW: width, h, viewBox: `0 0 ${width} ${h}` };
 }
 
 // Per-line clean-up after abcjs has drawn it:
@@ -286,7 +311,9 @@ function fitChords(svg, chords, lineRight) {
 }
 
 // Render one song. Returns { pages: [svgElement], warnings, abc, key }.
-export function renderSong(song, { paper: paperName = 'letter', transpose } = {}) {
+export function renderSong(typed, { paper: paperName = 'letter', transpose } = {}) {
+  // The layout (written out / form / compact) decides which sections are drawn.
+  const { song, note: layoutNote } = arrangeSong(typed);
   const paper = PAPER[paperName] || PAPER.letter;
   const steps = transpose ?? (song.transpose || 0);
   const raw = song.useRaw && song.raw && song.raw.trim();
@@ -349,7 +376,11 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
     const viewBox = s.getAttribute('viewBox') || `0 0 ${w} ${h}`;
     return { svg: s, w, fullW, h, viewBox };
   });
-  const headerCount = Math.max(0, lines.length - lineSections.length);
+  let headerCount = Math.max(0, lines.length - lineSections.length);
+  if (song.formText) {
+    lines.splice(headerCount, 0, formLine(song.formText, contentW, tf));
+    headerCount++;
+  }
 
   // Lay out lines on pages.
   const pages = [];
@@ -388,7 +419,7 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
     y += h;
   });
   host.innerHTML = '';
-  return { pages, warnings, abc, key: transposeKeyName(song.key, steps) };
+  return { pages, warnings, abc, key: transposeKeyName(song.key, steps), layoutNote };
 }
 
 // ---------- PDF ----------
