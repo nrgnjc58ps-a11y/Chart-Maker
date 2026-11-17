@@ -43,7 +43,9 @@ function el(name, attrs = {}, text) {
 }
 
 function newPage(paper) {
-  const svg = el('svg', { xmlns: SVGNS, viewBox: `0 0 ${paper.w} ${paper.h}`, width: paper.w, height: paper.h, class: 'page-svg' });
+  // Charts are always black ink on white paper, whatever the phone's light/dark theme
+  // (abcjs draws in "currentColor", so the colour must be set here).
+  const svg = el('svg', { xmlns: SVGNS, viewBox: `0 0 ${paper.w} ${paper.h}`, width: paper.w, height: paper.h, class: 'page-svg', color: '#000', style: 'color:#000' });
   svg.appendChild(el('rect', { x: 0, y: 0, width: paper.w, height: paper.h, fill: '#fff' }));
   return svg;
 }
