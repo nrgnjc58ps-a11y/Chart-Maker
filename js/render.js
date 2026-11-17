@@ -56,14 +56,27 @@ function pageHeader(svg, paper, pageNo, title, style) {
 
 const CHORD_GAP = 6; // px between chord baseline and the top staff line (before page scaling)
 
+// A measured box, or null when the browser can't give a sensible one
+// (browsers differ here, so every measurement is checked before use).
+function box(node) {
+  try {
+    const b = node.getBBox();
+    if (!b || !isFinite(b.x) || !isFinite(b.y) || (!b.width && !b.height)) return null;
+    return b;
+  } catch {
+    return null;
+  }
+}
+
 // Per-line clean-up after abcjs has drawn it:
 //  - pull chord symbols (and text stacked above them) down close to the staff
 //  - draw one-bar repeat signs where the generator left invisible anchors
 function tidyLine(svg, song) {
   const topLine = svg.querySelector('.abcjs-top-line');
-  if (!topLine) return;
-  const staffTop = topLine.getBBox().y;
-  const lineYs = [...svg.querySelectorAll('.abcjs-staff path')].map((p) => p.getBBox().y).filter((y) => y > staffTop + 1).sort((a, b) => a - b);
+  const topBox = topLine && box(topLine);
+  if (!topBox) return;
+  const staffTop = topBox.y;
+  const lineYs = [...svg.querySelectorAll('.abcjs-staff path')].map((p) => box(p)?.y).filter((y) => y > staffTop + 1).sort((a, b) => a - b);
   const sp = lineYs.length && lineYs[0] - staffTop > 3 && lineYs[0] - staffTop < 20 ? lineYs[0] - staffTop : 8;
 
   // One-bar repeat signs.
@@ -87,7 +100,7 @@ function tidyLine(svg, song) {
   let ceiling = staffTop;
   svg.querySelectorAll('path, polygon').forEach((p) => {
     if (p.closest('.abcjs-ending, .abcjs-tempo, .simile')) return;
-    const y = p.getBBox().y;
+    const y = box(p)?.y;
     if (y < ceiling && y > staffTop - 60) ceiling = y;
   });
   const above = [...svg.querySelectorAll('text.abcjs-annotation')].filter((t) => parseFloat(t.getAttribute('y')) < staffTop);
@@ -98,10 +111,10 @@ function tidyLine(svg, song) {
     const oldLowest = Math.max(...above.map((t) => parseFloat(t.getAttribute('y'))));
     chords.forEach((t) => t.setAttribute('y', base));
     // Notes above ("Band out", "x3"): next to the chords if there is room, otherwise just above them.
-    const rowH = chords.length ? Math.max(...chords.map((t) => t.getBBox().height)) * 0.62 : 0;
+    const rowH = chords.length ? Math.max(18, ...chords.map((t) => box(t)?.height || 0)) * 0.62 : 0;
     notes.forEach((t) => {
-      const bb = t.getBBox();
-      const clash = chords.some((c) => { const cb = c.getBBox(); return cb.x < bb.x + bb.width + 4 && bb.x < cb.x + cb.width + 4; });
+      const bb = box(t);
+      const clash = !bb || chords.some((c) => { const cb = box(c); return !cb || (cb.x < bb.x + bb.width + 4 && bb.x < cb.x + cb.width + 4); });
       t.setAttribute('y', clash ? base - rowH : base);
     });
     const delta = base - oldLowest;
@@ -109,15 +122,24 @@ function tidyLine(svg, song) {
     if (delta > 0) svg.querySelectorAll('text.abcjs-part').forEach((t) => t.setAttribute('y', parseFloat(t.getAttribute('y')) + delta));
   }
   // Trim empty bands above and below the line, keeping a little breathing room.
+  // Measure the drawn pieces one by one (not the whole SVG, which some browsers report as empty).
   const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
-  if (vb.length === 4) {
-    const bb = svg.getBBox();
-    const top = Math.max(vb[1], bb.y - 6);
-    const bottom = Math.min(vb[1] + vb[3], bb.y + bb.height + 14);
-    const h = bottom - top;
-    svg.setAttribute('viewBox', `${vb[0]} ${top} ${vb[2]} ${h}`);
-    svg.setAttribute('height', h);
-  }
+  if (vb.length !== 4 || vb.some((n) => !isFinite(n))) return;
+  let minY = Infinity, maxY = -Infinity;
+  svg.querySelectorAll('path, text, polygon, circle, line, use').forEach((n) => {
+    const b = box(n);
+    if (!b) return;
+    minY = Math.min(minY, b.y);
+    maxY = Math.max(maxY, b.y + b.height);
+  });
+  if (!isFinite(minY) || !isFinite(maxY)) return;
+  const top = Math.max(vb[1], minY - 6);
+  const bottom = Math.min(vb[1] + vb[3], maxY + 14);
+  const h = bottom - top;
+  // Only trim when the result is sane: the staff is inside it and it isn't tiny.
+  if (!(h > 40) || staffTop < top || staffTop > bottom) return;
+  svg.setAttribute('viewBox', `${vb[0]} ${top} ${vb[2]} ${h}`);
+  svg.setAttribute('height', h);
 }
 
 // How many spacer units each chord label needs so it clears the next label
@@ -131,11 +153,13 @@ function lineScales(target) {
   return [...target.querySelectorAll('svg')].map((svg) => {
     const chords = [...svg.querySelectorAll('text.abcjs-annotation')].filter((t) => !t.hasAttribute('data-note') && !t.textContent.includes(SIMILE_MARK));
     if (chords.length < 2) return 1;
-    const bars = [...svg.querySelectorAll('.abcjs-bar')].map((b) => b.getBBox());
-    const right = bars.length ? Math.max(...bars.map((b) => b.x + b.width)) : 0;
+    const bars = [...svg.querySelectorAll('.abcjs-bar')].map(box).filter(Boolean);
+    if (!bars.length) return 1;
+    const right = Math.max(...bars.map((b) => b.x + b.width));
     const left = Math.min(...chords.map((t) => parseFloat(t.getAttribute('x'))));
-    const total = chords.reduce((sum, t) => sum + t.getBBox().width + LABEL_GAP, 0) * 1.08;
-    return Math.max(MIN_SCALE, Math.min(1, (right - left) / total));
+    const total = chords.reduce((sum, t) => sum + (box(t)?.width || 0) + LABEL_GAP, 0) * 1.08;
+    const k = (right - left) / total;
+    return isFinite(k) && k > 0 ? Math.max(MIN_SCALE, Math.min(1, k)) : 1;
   });
 }
 
@@ -153,12 +177,13 @@ function chordCrowding(target, chordCount, scales) {
   let any = false;
   all.forEach((c, i) => {
     const x = parseFloat(c.t.getAttribute('x'));
-    const w = c.t.getBBox().width * (scales[c.li] || 1);
+    const w = (box(c.t)?.width || 0) * (scales[c.li] || 1);
+    if (!isFinite(x) || !w) return;
     const next = all[i + 1];
     let limit;
     if (next && next.li === c.li) limit = parseFloat(next.t.getAttribute('x')) - LABEL_GAP;
     else {
-      const bars = [...c.svg.querySelectorAll('.abcjs-bar')].map((b) => b.getBBox());
+      const bars = [...c.svg.querySelectorAll('.abcjs-bar')].map(box).filter(Boolean);
       limit = bars.length ? Math.max(...bars.map((b) => b.x + b.width)) + 4 : Infinity;
     }
     const over = x + w - limit;
@@ -213,9 +238,11 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
   let pads = [];
   draw(pads);
   // Decide lettering size per line from the first drawing (line breaks don't change).
-  const scales = raw ? [] : lineScales(target);
+  let scales = [];
+  try { if (!raw) scales = lineScales(target); } catch (e) { console.warn('lineScales', e); }
   for (let round = 0; round < 6 && !raw; round++) {
-    const more = chordCrowding(target, chordCount, scales);
+    let more = null;
+    try { more = chordCrowding(target, chordCount, scales); } catch (e) { console.warn('chordCrowding', e); }
     if (!more) break;
     pads = pads.slice();
     more.forEach((n, i) => { if (n) pads[i] = (pads[i] || 0) + n; });
@@ -233,11 +260,14 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
     for (const w of tunes[0].warnings.slice(0, 5)) warnings.push(String(w).replace(/<[^>]+>/g, ''));
   }
 
-  target.querySelectorAll('svg').forEach((svg) => tidyLine(svg, song));
+  target.querySelectorAll('svg').forEach((svg) => {
+    try { tidyLine(svg, song); } catch (e) { console.warn('tidyLine', e); }
+  });
 
   const lines = [...target.querySelectorAll('svg')].map((s) => {
     const w = parseFloat(s.getAttribute('width')) || contentW;
-    const h = parseFloat(s.getAttribute('height')) || 50;
+    let h = parseFloat(s.getAttribute('height'));
+    if (!(h > 0)) h = 50;
     // abcjs gives each line its own viewBox (offset down the original tune); keep it.
     const viewBox = s.getAttribute('viewBox') || `0 0 ${w} ${h}`;
     return { svg: s, w, h, viewBox };

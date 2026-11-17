@@ -386,7 +386,14 @@ function renderPreview(song, immediate = true) {
   const go = () => {
     const pagesEl = $('#pages');
     if (!pagesEl) return;
-    const res = renderSong(song, { paper: state.prefs.paper });
+    let res;
+    try {
+      res = renderSong(song, { paper: state.prefs.paper });
+    } catch (err) {
+      console.error(err);
+      pagesEl.innerHTML = `<div class="warn">The chart couldn’t be drawn: ${esc(err && err.message)}. Please send Claude a screenshot of this message.</div>`;
+      return;
+    }
     pagesEl.innerHTML = '';
     res.pages.forEach((p) => {
       const w = document.createElement('div');
@@ -475,7 +482,7 @@ async function makePdf(getPages, name) {
     });
   } catch (err) {
     console.error(err);
-    sheet.innerHTML = `<h3>Couldn’t make the PDF</h3><p>${esc(err.message)}</p><div class="actions"><button class="btn" data-m="close">Close</button></div>`;
+    sheet.innerHTML = `<h3>Couldn’t make the PDF</h3><p>${esc(err && err.message)}</p><p class="small muted">A screenshot of this helps Claude fix it.</p><div class="actions"><button class="btn" data-m="close">Close</button></div>`;
     sheet.addEventListener('click', (e) => { if (e.target.dataset.m === 'close') closeModal(); });
   }
 }
@@ -637,6 +644,10 @@ document.addEventListener('click', (e) => {
     }
   }
 });
+
+// Show unexpected errors instead of failing silently (a screenshot then pinpoints the problem).
+window.addEventListener('error', (e) => toast(`Something went wrong: ${e.message || 'unknown error'}`, 6000));
+window.addEventListener('unhandledrejection', (e) => toast(`Something went wrong: ${(e.reason && e.reason.message) || e.reason || 'unknown error'}`, 6000));
 
 // Save immediately when the app is backgrounded (iOS may kill it).
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') store.save(true); });
