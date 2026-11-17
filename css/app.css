@@ -160,6 +160,9 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
 .modal[hidden] { display: none; }
 .sheet { background: var(--card); color: var(--text); border-radius: 16px; padding: 18px; width: 100%; max-width: 520px; max-height: 85vh; overflow: auto; margin-bottom: env(safe-area-inset-bottom); }
 .sheet h3 { margin: 0 0 8px; font-size: 19px; }
+.photo-thumbs { display: flex; gap: 8px; overflow-x: auto; margin: 8px 0; }
+.photo-thumbs img { height: 140px; border-radius: 8px; border: 1px solid var(--line, #ccc); object-fit: contain; background: #fff; }
+.spinner.inline { display: inline-block; width: 14px; height: 14px; margin: 0 6px -2px 0; border-width: 2px; }
 .sheet .actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
 @media (min-width: 700px) { .modal { align-items: center; } }
 .toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: #222; color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 60; font-size: 15px; max-width: 90vw; }

@@ -3,6 +3,7 @@ import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, resolve
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
 import { renderSong, pagesToPdf, loadFonts, setChordSize, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
+import { photoImportAvailable, readChartImages, errorText, imageTypes, maxImages } from './photo.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -14,6 +15,7 @@ const NO_AUTO = 'autocapitalize="off" autocorrect="off" autocomplete="off" spell
 
 let state;
 let previewTimer;
+let photoOK = false; // can this view ask Claude to read a picture of a chart?
 
 // ---------- helpers ----------
 function toast(msg, ms = 2200) {
@@ -188,6 +190,57 @@ async function deleteSongs(ids) {
   store.save(true);
   toast(ids.length === 1 ? `Deleted “${names[0]}”` : `Deleted ${ids.length} songs`);
   return true;
+}
+
+// ---------- new song: blank, or read from a photo of a chart ----------
+function newSongSheet() {
+  const many = maxImages() > 1;
+  openModal(`
+    <h3>New chart</h3>
+    <div class="actions">
+      <button class="btn primary" data-act="new-blank">Blank chart</button>
+      <label class="btn">From a photo or screenshot…<input type="file" id="photo-pick" accept="${esc(imageTypes())}" ${many ? 'multiple' : ''} hidden></label>
+    </div>
+    <p class="small muted">Pick a picture of a chart${many ? ` (up to ${maxImages()} pages of one song)` : ''}. Claude reads it and writes it out here for you to check and edit.</p>`);
+  $('#photo-pick').addEventListener('change', (e) => {
+    const files = [...e.target.files];
+    if (files.length) importFromPhotos(files);
+  });
+}
+
+async function importFromPhotos(files) {
+  const ctl = new AbortController();
+  const urls = files.map((f) => URL.createObjectURL(f));
+  const sheet = openModal(`
+    <h3>Reading the chart…</h3>
+    <div class="photo-thumbs">${urls.map((u) => `<img src="${u}" alt="">`).join('')}</div>
+    <p class="small muted"><span class="spinner inline"></span> This usually takes 20–60 seconds.</p>
+    <div class="actions"><button class="btn" data-m="stop">Stop</button></div>`);
+  sheet.addEventListener('click', (e) => { if (e.target.dataset.m === 'stop') ctl.abort(); });
+  const done = () => urls.forEach((u) => URL.revokeObjectURL(u));
+  let result;
+  try {
+    result = await readChartImages(files, ctl.signal);
+  } catch (err) {
+    done();
+    if (err && err.code === 'cancelled') { closeModal(); return; }
+    const m = openModal(`<h3>Couldn’t read that chart</h3><p>${esc(errorText(err))}</p><div class="actions"><button class="btn" data-m="close">OK</button></div>`);
+    m.addEventListener('click', (e) => { if (e.target.dataset.m === 'close') closeModal(); });
+    return;
+  }
+  done();
+  const { song, unsure } = result;
+  state.songs.push(song);
+  store.save(true);
+  sessionStorageSet('view', 'preview');
+  closeModal();
+  navigate(`/song/${song.id}`);
+  const m = openModal(`
+    <h3>Chart imported</h3>
+    <p>Check it against the original before the gig: the chords, repeats and endings are read from the picture and can be wrong.</p>
+    ${unsure.length ? `<p class="small"><b>Worth a closer look:</b></p><ul class="small">${unsure.map((u) => `<li>${esc(u)}</li>`).join('')}</ul>` : ''}
+    <div class="actions"><button class="btn primary" data-m="close">OK</button></div>`);
+  m.addEventListener('click', (e) => { if (e.target.dataset.m === 'close') closeModal(); });
 }
 
 function settingsSheet() {
@@ -572,6 +625,16 @@ document.addEventListener('click', (e) => {
 
   switch (act) {
     case 'new-song': {
+      if (photoOK) { newSongSheet(); break; }
+      const s = store.newSong();
+      state.songs.push(s);
+      store.save(true);
+      sessionStorageSet('view', 'edit');
+      navigate(`/song/${s.id}`);
+      break;
+    }
+    case 'new-blank': {
+      closeModal();
       const s = store.newSong();
       state.songs.push(s);
       store.save(true);
@@ -754,6 +817,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   });
   await loadFonts();
   route();
+  photoImportAvailable().then((ok) => { photoOK = ok; });
   if (!ARTIFACT && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
