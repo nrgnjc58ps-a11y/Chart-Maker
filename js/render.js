@@ -128,17 +128,21 @@ function tidyLine(svg, song) {
     // Section labels travel with the chords so they stay just above them.
     if (delta > 0) svg.querySelectorAll('text.abcjs-part').forEach((t) => t.setAttribute('y', parseFloat(t.getAttribute('y')) + delta));
   }
-  // Short line: cut off the invisible filler bars after the last real barline.
+  // Every bar on the line gets exactly the same width (a fixed grid, like a written chart).
+  // A short line is padded with invisible filler bars; they set the grid, then get cut off.
   const bars = [...svg.querySelectorAll('.abcjs-bar')].map(box).filter(Boolean);
   let lineRight = bars.length ? Math.max(...bars.map((b) => b.x + b.width)) : Infinity;
   const fill = [...svg.querySelectorAll('text')].find((t) => t.textContent.includes(FILL_MARK));
+  const fx = fill ? parseFloat(fill.getAttribute('x')) : Infinity;
+  const missing = fill ? parseInt(fill.textContent.replace(/\D+/g, ''), 10) || 0 : 0;
+  if (fill) fill.remove();
+  try {
+    const right = equaliseBars(svg, fx, missing);
+    if (isFinite(right)) lineRight = right;
+  } catch (e) { console.warn('equaliseBars', e); }
   if (fill) {
-    const fx = parseFloat(fill.getAttribute('x'));
-    fill.remove();
-    const real = bars.filter((b) => b.x < fx);
     const vb0 = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
-    if (real.length && vb0.length === 4 && isFinite(fx)) {
-      lineRight = Math.max(...real.map((b) => b.x + b.width));
+    if (vb0.length === 4 && isFinite(lineRight)) {
       const newW = lineRight + 2 - vb0[0];
       if (newW > 40 && newW < vb0[2]) {
         svg.setAttribute('data-fullw', svg.getAttribute('width') || vb0[2]);
@@ -173,6 +177,66 @@ function tidyLine(svg, song) {
 
 const LABEL_GAP = 6;
 const MIN_SCALE = 0.75; // smallest a crowded chord name gets
+
+// Lay a drawn line out again so each bar has the same width. Everything inside a bar
+// moves proportionally; long shapes (ties, beams, brackets, hairpins) stretch with it.
+// Returns the right edge of the last real bar.
+function equaliseBars(svg, fillX, missing) {
+  const notes = [...svg.querySelectorAll('g.abcjs-note')].map(box).filter(Boolean);
+  if (!notes.length) return NaN;
+  const firstNoteX = Math.min(...notes.map((b) => b.x));
+  const barList = [...svg.querySelectorAll('g.abcjs-bar')].map((g) => box(g)).filter(Boolean).sort((a, b) => a.x - b.x);
+  const lead = barList.filter((b) => b.x + b.width <= firstNoteX + 0.5);
+  const ends = barList.filter((b) => b.x + b.width > firstNoteX + 0.5 && b.x < fillX);
+  if (!ends.length) return NaN;
+  const extras = [...svg.querySelectorAll('.abcjs-staff-extra')].map(box).filter(Boolean);
+  const start = lead.length ? Math.max(...lead.map((b) => b.x + b.width))
+    : extras.length ? Math.max(...extras.map((b) => b.x + b.width)) : firstNoteX - 10;
+  const staff = [...svg.querySelectorAll('.abcjs-staff path')].map(box).filter(Boolean);
+  const last = ends[ends.length - 1];
+  const staffRight = staff.length ? Math.max(...staff.map((b) => b.x + b.width)) : last.x + last.width;
+  const n = ends.length;
+  const T = (staffRight - start - last.width) / (n + missing);
+  if (!(T > 10)) return NaN;
+  const oldB = [start, ...ends.map((b) => b.x)];
+  const newB = oldB.map((_, k) => start + k * T);
+  for (let k = 1; k < oldB.length; k++) if (!(oldB[k] > oldB[k - 1])) return NaN; // unexpected layout: leave as drawn
+  const map = (x) => {
+    if (x <= oldB[0]) return x;
+    for (let k = 0; k < n; k++) {
+      if (x <= oldB[k + 1]) return newB[k] + ((x - oldB[k]) * (newB[k + 1] - newB[k])) / (oldB[k + 1] - oldB[k]);
+    }
+    return x + (newB[n] - oldB[n]);
+  };
+  const withTransform = (node, t) => node.setAttribute('transform', `${t} ${node.getAttribute('transform') || ''}`.trim());
+  svg.querySelectorAll('path, text, polygon, circle, ellipse, line, rect, use').forEach((node) => {
+    if (node.closest('.abcjs-staff, .abcjs-staff-extra')) return;
+    if (node.tagName === 'text') {
+      const x = parseFloat(node.getAttribute('x'));
+      if (!isFinite(x)) return;
+      const dx = map(x) - x;
+      if (Math.abs(dx) < 0.01) return;
+      node.setAttribute('x', x + dx);
+      node.querySelectorAll('tspan[x]').forEach((t) => t.setAttribute('x', parseFloat(t.getAttribute('x')) + dx));
+      return;
+    }
+    if (node.closest('text')) return;
+    const b = box(node);
+    if (!b) return;
+    if (b.width <= 30) {
+      const c = b.x + b.width / 2;
+      const dx = map(c) - c;
+      if (Math.abs(dx) >= 0.01) withTransform(node, `translate(${dx} 0)`);
+    } else {
+      const L = b.x, R = b.x + b.width;
+      const L2 = map(L), R2 = map(R);
+      const a = (R2 - L2) / (R - L);
+      if (Math.abs(a - 1) < 0.001 && Math.abs(L2 - L) < 0.01) return;
+      withTransform(node, `matrix(${a} 0 0 1 ${L2 - a * L} 0)`);
+    }
+  });
+  return newB[n] + last.width;
+}
 
 // Make each chord name fit before the next one: shrink just that name (down to 75%),
 // and if it still doesn't fit, lift it half a row so the two never collide.

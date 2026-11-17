@@ -79,7 +79,7 @@ function put(field, before, after) {
   try { field.setSelectionRange(p, p); } catch { /* ignore */ }
   field.dispatchEvent(new Event('input', { bubbles: true }));
 }
-const needsSpace = (before) => before.length && !/[\s/]$/.test(before);
+const needsSpace = (before) => before.length && !/[\s/]$/.test(before) && !/(^|\s)\^$/.test(before);
 
 function insertToken(field, token) {
   const { before, after } = ctx(field);
@@ -188,7 +188,7 @@ function draw() {
     </div>
     <div class="pk-label pk-labelrow"><span>In ${pretty(key)}</span>${btn(style === 'short' ? 'CΔ7 · C-7' : 'Cmaj7 · Cm7', 'style', style === 'short' ? 'standard' : 'short', '', 'pk-style')}</div>
     <div class="pk-row pk-key">${diatonic.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord')).join('')}</div>
-    <div class="pk-row pk-key">${extra.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}</div>
+    <div class="pk-row pk-key">${extra.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}${btn('^', 'tok', '^', 'push')}</div>
     <div class="pk-row pk-alt">${ALTS.map((m) => btn(m === 'alt' ? 'alt' : pretty(m), 'mod', m)).join('')}</div>
     <div class="pk-row pk-mods">${MODS.map((m) => btn(modLabel(m), 'mod', m)).join('')}${btn('&lt;', 'tok', '<', 'cresc')}${btn('N.C.', 'tok', 'N.C.')}</div>
     <div class="pk-row pk-roots">${roots(key).map((r) => btn(pretty(r), 'chord', r, '', 'pk-root')).join('')}</div>`;

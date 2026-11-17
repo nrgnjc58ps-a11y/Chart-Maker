@@ -104,7 +104,8 @@ function tokenize(bar) {
 }
 
 export function parseBar(text) {
-  const bar = { simile: false, beats: [], accents: 0, hairpin: null, above: [], startDecos: [], endDecos: [], endText: [], rhythm: null, custom: null, warnings: [] };
+  let pushNext = false;
+  const bar = { simile: false, pushes: false, beats: [], accents: 0, hairpin: null, above: [], startDecos: [], endDecos: [], endText: [], rhythm: null, custom: null, warnings: [] };
   for (const tok of tokenize(normalise(text).trim())) {
     const low = tok.toLowerCase();
     if (tok.startsWith('{')) {
@@ -128,8 +129,15 @@ export function parseBar(text) {
       else { bar.endDecos.push(k.deco); if (k.text) bar.endText.push(k.text); }
     } else if (tok === '.' || tok === '/' || tok === '-') {
       bar.beats.push(null);
+    } else if (tok === '^') {
+      pushNext = true;
+    } else if (tok.startsWith('^') && CHORD_RE.test(tok.slice(1))) {
+      bar.beats.push('^' + canonicalChord(tok.slice(1)));
+      bar.pushes = true;
     } else if (CHORD_RE.test(tok)) {
-      bar.beats.push(canonicalChord(tok));
+      bar.beats.push((pushNext ? '^' : '') + canonicalChord(tok));
+      if (pushNext) bar.pushes = true;
+      pushNext = false;
     } else {
       bar.warnings.push(tok);
     }
@@ -248,7 +256,7 @@ const textNote = (pos, t) => `"${pos}${TEXT_MARK}${abcText(t)}"`;
 function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
   const chordText = (c) => {
     tr.ord++;
-    return `"^${c.split(/\s+/).map((x) => prettyChord(styleChord(transposeChord(x, tr.steps, tr.key), tr.style))).join('  ')}"`;
+    return `"^${c.replace(/(^|\s)\^/g, '$1').split(/\s+/).map((x) => prettyChord(styleChord(transposeChord(x, tr.steps, tr.key), tr.style))).join('  ')}"`;
   };
   const chords = placeChords(bar.beats, meter.beats);
   const startBits = extraStart + bar.startDecos.join('') + bar.above.map((t) => textNote('^', t)).join('');
@@ -277,6 +285,8 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
       return pre + m;
     });
   }
+
+  if (bar.pushes && meter.sub === 2 && meter.beatLen === 4) return pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc);
 
   const rhythm = bar.rhythm || defaultRhythm || 'slashes';
   const notes = []; // {chord, len, beam}
@@ -328,6 +338,52 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
     s += `${pre}${n.label}${RHY}B${n.len}${post}${room}${n.sep}`;
   });
   return s.trim();
+}
+
+// A bar with pushed chords ("C ^F": F on the 'and' of 2) in rhythm notation:
+// each chord's slash starts where the chord lands and is held (tied) to the next chord.
+// Units are sixteenths; an eighth push = 2.
+function pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc) {
+  const onsets = [];
+  chords.forEach((c, b) => {
+    if (!c) return;
+    const pushed = c.startsWith('^');
+    let pos = b * meter.beatLen - (pushed ? 2 : 0);
+    if (pos < 0) pos = 0; // a push on beat 1 belongs to the previous bar; keep it on 1
+    onsets.push({ pos, chord: pushed ? c.slice(1) : c });
+  });
+  onsets.sort((a, b) => a.pos - b.pos);
+  if (!onsets.length || onsets[0].pos > 0) onsets.unshift({ pos: 0, chord: null });
+  const end = meter.barLen;
+  const half = meter.barLen / 2;
+  const four = meter.barLen === 16; // half notes and dotted quarters only where they show the beat (4/4)
+  const notes = [];
+  onsets.forEach((o, i) => {
+    const stop = i + 1 < onsets.length ? onsets[i + 1].pos : end;
+    let p = o.pos;
+    const pieces = [];
+    while (p < stop) {
+      const left = stop - p;
+      let len;
+      if (p === 0 && left >= end) len = end; // whole bar
+      else if (four && (p === 0 || p === half) && left >= 8) len = 8; // half note on 1 or 3 (4/4)
+      else if (four && (p === 0 || p === half) && left >= 6) len = 6; // dotted quarter on 1 or 3 (4/4)
+      else if (p % 4 === 0 && left >= 4) len = 4; // quarter on the beat
+      else if (p % 2 === 0 && left >= 2) len = 2; // eighth
+      else len = 1;
+      pieces.push(len);
+      p += len;
+    }
+    pieces.forEach((len, k) => notes.push({ len, label: k === 0 && o.chord ? chordText(o.chord) : '', tie: k < pieces.length - 1 }));
+  });
+  return notes.map((n, i) => {
+    let pre = '';
+    if (i === 0) pre += startBits + cresc[0];
+    if (i < bar.accents) pre += '!>!';
+    if (i === notes.length - 1) pre += endBits;
+    const post = (n.tie ? '-' : '') + (i === notes.length - 1 && cresc[1] ? cresc[1] : '');
+    return `${pre}${n.label}${RHY}B${n.len}${post}`;
+  }).join(' ');
 }
 
 const KEY_INDEX = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11, Cb: 11 };
@@ -521,7 +577,7 @@ export function songToAbc(song, steps = 0, pads = []) {
       // Short line: pad with invisible bars so every bar on the chart is the same width.
       for (let k = chunk.length; k < per; k++) {
         const ghost = barToAbc(parseBar(''), meter, sec.rhythm, '', '', tr).replace(/!style=rhythm!B/g, 'x');
-        line += `${k === chunk.length ? `"_${FILL_MARK}"` : ''}${ghost} [|] `;
+        line += `${k === chunk.length ? `"_${FILL_MARK}${per - chunk.length}"` : ''}${ghost} [|] `;
       }
       // Bar numbers count real bars only.
       out.push(`%%setbarnb ${tr.bar}`);

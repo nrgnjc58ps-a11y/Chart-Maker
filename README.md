@@ -10,6 +10,7 @@ A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Typ
   |---|---|
   | `E \| \| C#m \| \| A \| B/A` | bars separated by `\|`; an empty bar keeps the previous chord |
   | `A B/A` | two chords splitting a bar · `A . . B` = A for 3 beats, B on 4 |
+  | `C ^F` | push: F lands an eighth early (on the "and" of 2); the bar is written in rhythm notation |
   | `E >>` | accents on the first two slashes |
   | `B <` / `B dim` | crescendo / diminuendo hairpin |
   | `"Band out"` | text above the bar |
