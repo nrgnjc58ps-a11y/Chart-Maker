@@ -4,7 +4,7 @@ A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Typ
 
 ## Using it
 
-- **Songs → + New song.** Fill in the title, tempo, time signature and key, then type each section's bars:
+- **Songs → + New song.** Fill in the title, tempo, time signature, key, capo and tuning (the key, capo and tuning print at the top of the chart), then type each section's bars:
 
   | Type this | You get |
   |---|---|

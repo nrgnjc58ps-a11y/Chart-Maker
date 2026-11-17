@@ -1,5 +1,5 @@
 // Engraves songs with abcjs, lays the lines out on pages, and exports PDFs.
-import { songToAbc, transposeKeyName, prettyChord, TEXT_MARK, FONT_STYLES } from './abcgen.js';
+import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FONT_STYLES } from './abcgen.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 export const PAPER = {
@@ -54,6 +54,57 @@ function pageHeader(svg, paper, pageNo, title, style) {
   svg.appendChild(el('text', { x: paper.w - MARGIN, y: MARGIN + 6, 'font-family': font, 'font-size': 14, fill: '#444', 'text-anchor': 'end' }, title));
 }
 
+const CHORD_GAP = 6; // px between chord baseline and the top staff line (before page scaling)
+
+// Per-line clean-up after abcjs has drawn it:
+//  - pull chord symbols (and text stacked above them) down close to the staff
+//  - draw one-bar repeat signs where the generator left invisible anchors
+function tidyLine(svg, song) {
+  const topLine = svg.querySelector('.abcjs-top-line');
+  if (!topLine) return;
+  const staffTop = topLine.getBBox().y;
+  const lineYs = [...svg.querySelectorAll('.abcjs-staff path')].map((p) => p.getBBox().y).filter((y) => y > staffTop + 1).sort((a, b) => a - b);
+  const sp = lineYs.length && lineYs[0] - staffTop > 3 && lineYs[0] - staffTop < 20 ? lineYs[0] - staffTop : 8;
+
+  // One-bar repeat signs.
+  const anchors = [...svg.querySelectorAll('text')].filter((t) => t.textContent.includes(SIMILE_MARK));
+  const beats = meterInfo(song.time).beats;
+  for (let i = 0; i + 1 < anchors.length; i += 2) {
+    const xs = parseFloat(anchors[i].getAttribute('x'));
+    const xe = parseFloat(anchors[i + 1].getAttribute('x'));
+    const beatW = beats > 1 ? (xe - xs) / (beats - 1) : 20;
+    const cx = (xs + xe + beatW) / 2;
+    const T = staffTop;
+    const g = el('g', { class: 'simile', fill: '#000' });
+    g.appendChild(el('polygon', { points: [[cx - 1.15 * sp, T + 3.35 * sp], [cx - 0.45 * sp, T + 3.35 * sp], [cx + 1.15 * sp, T + 0.65 * sp], [cx + 0.45 * sp, T + 0.65 * sp]].map((p) => p.join(',')).join(' ') }));
+    g.appendChild(el('circle', { cx: cx - 1.0 * sp, cy: T + 1.2 * sp, r: 0.32 * sp }));
+    g.appendChild(el('circle', { cx: cx + 1.0 * sp, cy: T + 2.8 * sp, r: 0.32 * sp }));
+    svg.appendChild(g);
+  }
+  anchors.forEach((t) => t.remove());
+
+  // Chords closer to the staff.
+  const above = [...svg.querySelectorAll('text.abcjs-annotation')].filter((t) => parseFloat(t.getAttribute('y')) < staffTop);
+  if (above.length) {
+    const lowest = Math.max(...above.map((t) => parseFloat(t.getAttribute('y'))));
+    const delta = staffTop - CHORD_GAP - lowest;
+    if (delta > 0) {
+      // Section labels travel with the chords so they stay just above them.
+      [...above, ...svg.querySelectorAll('text.abcjs-part')].forEach((t) => t.setAttribute('y', parseFloat(t.getAttribute('y')) + delta));
+    }
+  }
+  // Trim empty bands above and below the line, keeping a little breathing room.
+  const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+  if (vb.length === 4) {
+    const bb = svg.getBBox();
+    const top = Math.max(vb[1], bb.y - 6);
+    const bottom = Math.min(vb[1] + vb[3], bb.y + bb.height + 14);
+    const h = bottom - top;
+    svg.setAttribute('viewBox', `${vb[0]} ${top} ${vb[2]} ${h}`);
+    svg.setAttribute('height', h);
+  }
+}
+
 // Render one song. Returns { pages: [svgElement], warnings, abc, key }.
 export function renderSong(song, { paper: paperName = 'letter', transpose } = {}) {
   const paper = PAPER[paperName] || PAPER.letter;
@@ -100,6 +151,8 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
     t.querySelectorAll('tspan').forEach((s) => { s.textContent = s.textContent.split(TEXT_MARK).join(''); });
     if (!t.querySelector('tspan')) t.textContent = t.textContent.split(TEXT_MARK).join('');
   });
+
+  target.querySelectorAll('svg').forEach((svg) => tidyLine(svg, song));
 
   const lines = [...target.querySelectorAll('svg')].map((s) => {
     const w = parseFloat(s.getAttribute('width')) || contentW;

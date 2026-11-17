@@ -1,5 +1,5 @@
 import * as store from './store.js';
-import { RHYTHMS, KEYS, FONT_STYLES, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
+import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
 import { renderSong, renderSetlist, pagesToPdf, loadFonts, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
@@ -231,6 +231,12 @@ function drawEditPane(song) {
         <label class="field" style="min-width:90px">Key (as written)<select data-song="key">${KEYS.map((k) => `<option ${song.key === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
       </div>
       <div class="row" style="margin-top:8px">
+        <label class="field" style="min-width:90px;max-width:120px">Capo<select data-song="capo">${['', 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((n) => `<option value="${n}" ${String(song.capo || '') === String(n) ? 'selected' : ''}>${n === '' ? 'None' : 'Capo ' + n}</option>`).join('')}</select></label>
+        <label class="field">Tuning<select data-song="tuning">${Object.entries(TUNINGS).map(([k, t]) => `<option value="${k}" ${(song.tuning || 'standard') === k ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}</select></label>
+      </div>
+      ${song.tuning === 'custom' ? `<div class="row" style="margin-top:8px"><label class="field">Tuning (low to high)<input type="text" data-song="tuningCustom" value="${esc(song.tuningCustom)}" placeholder="e.g. C G D G B D" ${NO_AUTO}></label></div>` : ''}
+      <label class="check" style="margin-top:6px"><input type="checkbox" data-song="showKey" ${song.showKey !== false ? 'checked' : ''}> Print the key at the top (e.g. “Key: G major”)</label>
+      <div class="row" style="margin-top:8px">
         <label class="field">Chart lettering<select data-song="style">${Object.entries(FONT_STYLES).map(([k, f]) => `<option value="${k}" ${song.style === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label>
       </div>
     </div>
@@ -282,7 +288,7 @@ function sectionCard(s, i, count) {
       <label class="field" style="max-width:130px">Bars per line${sel('perLine', [2, 3, 4, 5, 6, 8].map((n) => `<option ${+s.perLine === n ? 'selected' : ''}>${n}</option>`).join(''))}</label>
     </div>
     <div class="row">
-      <label class="check"><input type="checkbox" data-sec="${i}" data-f="repeat" ${s.repeat ? 'checked' : ''}> Repeat</label>
+      <label class="check"><input type="checkbox" data-sec="${i}" data-f="repeat" ${s.repeat ? 'checked' : ''}> Repeat whole section ‖: :‖</label>
       <label class="check"><input type="checkbox" data-sec="${i}" data-f="pageBreak" ${s.pageBreak ? 'checked' : ''}> Start on a new page</label>
     </div>
     ${s.repeat ? `
@@ -313,6 +319,8 @@ function helpCard() {
       ${r('A B/A', 'Two chords in a bar split it in half.')}
       ${r('A . . B', '<b>.</b> holds a beat — here A for 3 beats, B on beat 4.')}
       ${r('N.C.', 'No chord.')}
+      ${r('|: G | C :|', 'Repeat signs anywhere in a section. <code>:|:</code> ends one repeat and starts the next.')}
+      ${r('G | % | % | %', '<b>%</b> is a one-bar repeat sign (play the previous bar again).')}
       ${r('E >>', 'Accent the first 2 slashes of the bar (<code>></code>, <code>>>></code>…).')}
       ${r('B <', 'Crescendo hairpin under the bar. <code>dim</code> for diminuendo.')}
       ${r('"Band out"', 'Text above the bar.')}
@@ -359,7 +367,8 @@ const onSongField = (e) => {
   const tgt = e.target;
   if ((tgt.type === 'checkbox') !== (e.type === 'change')) return;
   if (tgt.dataset.song) {
-    song[tgt.dataset.song] = tgt.value;
+    song[tgt.dataset.song] = tgt.type === 'checkbox' ? tgt.checked : tgt.value;
+    if (tgt.dataset.song === 'tuning') drawEditPane(song);
     if (tgt.dataset.song === 'title') $('#top-title').textContent = tgt.value || 'New song';
     if (tgt.dataset.song === 'key') { updateTransposeUi(song); refreshPalette(); }
   } else if (tgt.dataset.sec != null) {

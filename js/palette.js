@@ -92,10 +92,14 @@ function insertChord(field, name) {
     put(field, before + name.match(/^[A-G][#b]?/)[0], after);
   } else insertToken(field, name);
 }
-function insertBar(field) {
+function insertBar(field, kind = '|') {
   const { before, after } = ctx(field);
-  const b = before.replace(/\s+$/, '');
-  put(field, b + (b.length ? ' | ' : '| '), after);
+  let b = before.replace(/\s+$/, '');
+  // Upgrade the barline just typed instead of adding a second one.
+  if (kind === '|:' && /:\|$/.test(b)) { b = b.slice(0, -2).replace(/\s+$/, ''); kind = ':|:'; }
+  else if (kind !== '|' && /(^|\s)\|$/.test(b)) b = b.slice(0, -1).replace(/\s+$/, '');
+  else if (kind === ':|' && /\|:$/.test(b)) { b = b.slice(0, -2).replace(/\s+$/, ''); }
+  put(field, b + (b.length ? ' ' : '') + kind + ' ', after);
 }
 function addModifier(field, mod) {
   const { before, after } = ctx(field);
@@ -151,11 +155,12 @@ function draw() {
   const { diatonic, extra } = keyChords(key);
   pad.innerHTML = `
     <div class="pk-row pk-tools">
-      ${btn('|', 'bar', '', 'bar', 'pk-bar')}
+      ${btn('|', 'bar', '|', 'bar', 'pk-bar')}
+      ${btn('‖:', 'bar', '|:', 'repeat', 'pk-rep')}
+      ${btn(':‖', 'bar', ':|', 'end rpt', 'pk-rep')}
+      ${btn('%', 'tok', '%', 'bar rpt', 'pk-rep')}
       ${btn('·', 'tok', '.', 'hold')}
       ${btn('&gt;', 'tok', '>', 'accent')}
-      ${btn('&lt;', 'tok', '<', 'cresc')}
-      ${btn('N.C.', 'tok', 'N.C.')}
       ${btn('⌫', 'back', '', '', 'pk-del')}
       ${btn(kbHidden() ? '⌨' : '⌨̶', 'kb', '', kbHidden() ? 'type' : 'hide')}
       ${btn('Done', 'done', '', '', 'pk-done')}
@@ -163,14 +168,14 @@ function draw() {
     <div class="pk-label">In ${pretty(key)}</div>
     <div class="pk-row pk-key">${diatonic.map((c) => btn(pretty(c.name), 'chord', c.name, c.roman, 'pk-chord')).join('')}</div>
     <div class="pk-row pk-key">${extra.map((c) => btn(pretty(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}</div>
-    <div class="pk-row pk-mods">${MODS.map((m) => btn(m, 'mod', m)).join('')}</div>
+    <div class="pk-row pk-mods">${MODS.map((m) => btn(m, 'mod', m)).join('')}${btn('&lt;', 'tok', '<', 'cresc')}${btn('N.C.', 'tok', 'N.C.')}</div>
     <div class="pk-row pk-roots">${roots(key).map((r) => btn(pretty(r), 'chord', r, '', 'pk-root')).join('')}</div>`;
 }
 
 function act(b) {
   if (!field) return;
   const a = b.dataset.pk, v = b.dataset.v;
-  if (a === 'bar') insertBar(field);
+  if (a === 'bar') insertBar(field, v || '|');
   else if (a === 'tok') insertToken(field, v);
   else if (a === 'chord') insertChord(field, v);
   else if (a === 'mod') addModifier(field, v);

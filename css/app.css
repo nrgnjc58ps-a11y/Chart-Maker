@@ -193,8 +193,8 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
 .pk-roots, .pk-mods { display: grid; }
 .pk-roots { grid-template-columns: repeat(12, minmax(0, 1fr)); }
 @media (max-width: 600px) { .pk-roots { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
-.pk-mods { grid-template-columns: repeat(12, minmax(0, 1fr)); }
-@media (max-width: 600px) { .pk-mods { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
+.pk-mods { grid-template-columns: repeat(14, minmax(0, 1fr)); }
+@media (max-width: 600px) { .pk-mods { grid-template-columns: repeat(7, minmax(0, 1fr)); } }
 .pk-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .06em; max-width: 900px; width: 100%; margin: 2px auto -2px; }
 .pk {
   min-height: 40px; min-width: 0; padding: 2px 2px; border-radius: 8px;
@@ -214,3 +214,5 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
 .pk-mods .pk { font-size: 14px; min-height: 34px; }
 .pk-roots .pk { font-size: 15px; min-height: 34px; }
 .pk.pk-long { font-size: 13px; letter-spacing: -.02em; }
+.pk-rep { font-size: 20px; }
+.pk-tools .pk small { font-size: 9px; }

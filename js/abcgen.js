@@ -66,7 +66,7 @@ function tokenize(bar) {
 }
 
 export function parseBar(text) {
-  const bar = { beats: [], accents: 0, hairpin: null, above: [], startDecos: [], endDecos: [], endText: [], rhythm: null, custom: null, warnings: [] };
+  const bar = { simile: false, beats: [], accents: 0, hairpin: null, above: [], startDecos: [], endDecos: [], endText: [], rhythm: null, custom: null, warnings: [] };
   for (const tok of tokenize(normalise(text).trim())) {
     const low = tok.toLowerCase();
     if (tok.startsWith('{')) {
@@ -74,6 +74,8 @@ export function parseBar(text) {
     } else if (tok.startsWith('"')) {
       const t = tok.replace(/^"|"$/g, '').trim();
       if (t) bar.above.push(t);
+    } else if (tok === '%') {
+      bar.simile = true;
     } else if (/^>+$/.test(tok)) {
       bar.accents = tok.length;
     } else if (tok === '<' || low === 'cresc') {
@@ -96,6 +98,28 @@ export function parseBar(text) {
   }
   return bar;
 }
+
+// Bars with inline repeat signs: "|:" starts a repeat, ":|" ends one, ":|:" does both.
+export function splitBarsEx(text) {
+  const t = normalise(text).replace(/\n/g, ' ').replace(/::/g, ':|:').trim();
+  if (!t) return [];
+  const parts = t.split(/(:\|:|\|:|:\||\|)/);
+  const bars = [];
+  for (let i = 0; i < parts.length; i += 2) {
+    const seg = parts[i].trim();
+    const before = parts[i - 1], after = parts[i + 1];
+    const edge = i === 0 || i === parts.length - 1;
+    if (!seg && edge && parts.length > 1) continue; // leading/trailing barline
+    bars.push({
+      text: seg,
+      startRepeat: before === '|:' || before === ':|:',
+      endRepeat: after === ':|' || after === ':|:',
+    });
+  }
+  return bars;
+}
+
+const barsOf = (text) => splitBarsEx(text).map((b) => Object.assign(parseBar(b.text), { startRepeat: b.startRepeat, endRepeat: b.endRepeat }));
 
 export function splitBars(text) {
   const t = normalise(text).replace(/\n/g, ' ').trim();
@@ -147,6 +171,8 @@ const RHY = '!style=rhythm!';
 // Marks plain text (notes, "x3"…) so the renderer can give it the small text font.
 // Everything else drawn as an annotation is a chord symbol.
 export const TEXT_MARK = '\u2060';
+// Marks the invisible anchors of a one-bar repeat sign (drawn by the renderer).
+export const SIMILE_MARK = '\u2063';
 
 const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -194,6 +220,19 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
     return `[L:1/8]${startBits}${endBits}${firstChord ? chordText(firstChord) : ''}${body}[L:1/16]`;
   }
 
+  if (bar.simile) {
+    // One-bar repeat: invisible beats, with anchors the renderer replaces by the 𝄎 sign.
+    const first = bar.beats.find((c) => c);
+    const parts = [];
+    for (let b = 0; b < meter.beats; b++) {
+      let pre = '';
+      if (b === 0) pre = startBits + (first ? chordText(first) : '') + `"_${SIMILE_MARK}S"`;
+      if (b === meter.beats - 1) pre += endBits + `"_${SIMILE_MARK}E"`;
+      parts.push(`${pre}x${meter.beatLen}`);
+    }
+    return parts.join(' ');
+  }
+
   const rhythm = bar.rhythm || defaultRhythm || 'slashes';
   const notes = []; // {chord, len, beam}
   if (rhythm === 'whole') {
@@ -226,7 +265,7 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
     if (i === notes.length - 1) pre += endBits;
     let post = '';
     if (i === notes.length - 1 && cresc[1]) post = cresc[1];
-    s += `${n.chord}${pre}${RHY}B${n.len}${post}${n.sep}`;
+    s += `${pre}${n.chord}${RHY}B${n.len}${post}${n.sep}`;
   });
   return s.trim();
 }
@@ -269,7 +308,38 @@ export const FONT_STYLES = {
   },
 };
 
-function header(song) {
+export const TUNINGS = {
+  standard: { label: 'Standard (E A D G B E)', print: '' },
+  dropD: { label: 'Drop D (D A D G B E)', print: 'Drop D tuning' },
+  halfDown: { label: 'Half step down (E♭ A♭ D♭ G♭ B♭ E♭)', print: 'Tuning: ½ step down' },
+  wholeDown: { label: 'Whole step down (D G C F A D)', print: 'Tuning: whole step down' },
+  dropC: { label: 'Drop C (C G C F A D)', print: 'Drop C tuning' },
+  dadgad: { label: 'DADGAD', print: 'Tuning: DADGAD' },
+  openG: { label: 'Open G (D G D G B D)', print: 'Open G tuning (DGDGBD)' },
+  openD: { label: 'Open D (D A D F♯ A D)', print: 'Open D tuning (DADF♯AD)' },
+  openE: { label: 'Open E (E B E G♯ B E)', print: 'Open E tuning (EBEG♯BE)' },
+  custom: { label: 'Other…', print: '' },
+};
+
+export function keyLabel(key) {
+  const m = /^([A-G][#b]?)(m?)$/.exec(key || 'C');
+  if (!m) return key;
+  return prettyChord(m[1]) + (m[2] ? ' minor' : ' major');
+}
+
+// The line printed above the first system: "Key: G major · Capo 2 · Drop D tuning"
+export function infoLine(song, steps = 0) {
+  const bits = [];
+  if (song.showKey !== false) bits.push('Key: ' + keyLabel(transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps)));
+  const capo = parseInt(song.capo, 10);
+  if (capo > 0) bits.push(`Capo ${capo}`);
+  const t = TUNINGS[song.tuning];
+  if (song.tuning === 'custom' && song.tuningCustom) bits.push('Tuning: ' + song.tuningCustom.trim());
+  else if (t && t.print) bits.push(t.print);
+  return bits.join('   ·   ');
+}
+
+function header(song, steps) {
   const f = FONT_STYLES[song.style] || FONT_STYLES.hand;
   const lines = [
     'X:1',
@@ -278,10 +348,14 @@ function header(song) {
   if (song.composer) lines.push(`C:${abcText(song.composer)}`);
   lines.push(`M:${song.time || '4/4'}`, 'L:1/16');
   const tempo = parseInt(song.tempo, 10);
+  const info = abcText(infoLine(song, steps));
+  const label = info ? `"${info}${tempo > 0 ? '   ·   ' : ''}" ` : '';
   if (tempo > 0) {
     const meter = meterInfo(song.time);
     const beatNote = meter.beatLen === 6 ? '3/8' : meter.beatLen === 2 ? '1/8' : meter.beatLen === 8 ? '1/2' : '1/4';
-    lines.push(`Q:${beatNote}=${tempo}`);
+    lines.push(`Q:${label}${beatNote}=${tempo}`);
+  } else if (info) {
+    lines.push(`Q:"${info}"`);
   }
   lines.push(
     '%%barnumbers 0',
@@ -301,19 +375,19 @@ function header(song) {
 export function songToAbc(song, steps = 0) {
   const meter = meterInfo(song.time);
   const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps) };
-  const out = header(song);
+  const out = header(song, steps);
   const key = KEYS.includes(song.key) ? song.key : 'C';
   out.push(`K:${key}`, 'V:1 stem=up');
   const lineSections = [];
   const warnings = [];
-  const sections = (song.sections || []).filter((s) => splitBars(s.bars).length || splitBars(s.ending1).length || s.label);
+  const sections = (song.sections || []).filter((s) => splitBarsEx(s.bars).length || splitBarsEx(s.ending1).length || s.label);
 
   sections.forEach((sec, si) => {
     const isLast = si === sections.length - 1;
-    const main = splitBars(sec.bars).map(parseBar);
+    const main = barsOf(sec.bars);
     const repeat = !!sec.repeat;
-    const end1 = repeat ? splitBars(sec.ending1).map(parseBar) : [];
-    const end2 = repeat ? splitBars(sec.ending2).map(parseBar) : [];
+    const end1 = repeat ? barsOf(sec.ending1) : [];
+    const end2 = repeat ? barsOf(sec.ending2) : [];
     if (!main.length && !end1.length) main.push(parseBar(''));
     [...main, ...end1, ...end2].forEach((b) => b.warnings.forEach((w) => warnings.push(`${sec.label || 'Section ' + (si + 1)}: “${w}” isn't a chord or keyword`)));
 
@@ -338,6 +412,8 @@ export function songToAbc(song, steps = 0) {
         if (timesText) items[items.length - 1].extraEnd = textNote('^', timesText);
       }
     }
+    // Inline repeat ends (":|" typed in the bars).
+    items.forEach((it) => { if (it.bar.endRepeat && it.after === '|') it.after = ':|'; });
     const lastItem = items[items.length - 1];
     if (lastItem.after === '|') lastItem.after = isLast ? '|]' : '||';
     if (isLast && end2.length) lastItem.after = '|]';
@@ -353,9 +429,17 @@ export function songToAbc(song, steps = 0) {
       chunks[chunks.length - 2].push(...chunks.pop());
     }
 
+    // Inline repeat starts ("|:"): at a line start it opens the line, otherwise it joins the previous barline.
+    chunks.forEach((chunk) => chunk.forEach((it, j) => {
+      if (!it.bar.startRepeat) return;
+      if (j === 0) { it.lineStart = true; return; }
+      const prev = chunk[j - 1];
+      prev.after = prev.after === ':|' ? '::' : '|:';
+    }));
+
     if (sec.label) out.push(`P:${abcText(sec.label)}`);
     chunks.forEach((chunk, ci) => {
-      let line = ci === 0 && repeat ? '|:' : '';
+      let line = (ci === 0 && repeat) || chunk[0].lineStart ? '|:' : '';
       chunk.forEach((it) => {
         if (it.before) line += `${it.before} `;
         line += barToAbc(it.bar, meter, sec.rhythm, it.extraStart || '', it.extraEnd || '', tr) + ` ${it.after} `;
