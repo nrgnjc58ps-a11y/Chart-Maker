@@ -211,6 +211,8 @@ const RHY = '!style=rhythm!';
 export const TEXT_MARK = '\u2060';
 // Marks the invisible anchors of a one-bar repeat sign (drawn by the renderer).
 export const SIMILE_MARK = '\u2063';
+// Marks where invisible filler bars start on a short line (the renderer trims them off).
+export const FILL_MARK = '\u2064';
 
 const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -261,16 +263,19 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
   }
 
   if (bar.simile) {
-    // One-bar repeat: invisible beats, with anchors the renderer replaces by the 𝄎 sign.
+    // One-bar repeat: invisible copies of this section's slashes (so the bar is the same
+    // width as its neighbours), with anchors the renderer replaces by the 𝄎 sign.
+    const ghost = barToAbc(parseBar(bar.rhythm || ''), meter, defaultRhythm, '', '', tr).replace(/!style=rhythm!B/g, 'x');
+    const n = (ghost.match(/x/g) || []).length;
     const first = bar.beats.find((c) => c);
-    const parts = [];
-    for (let b = 0; b < meter.beats; b++) {
+    let k = 0;
+    return ghost.replace(/x/g, (m) => {
+      k++;
       let pre = '';
-      if (b === 0) pre = startBits + (first ? chordText(first) : '') + `"_${SIMILE_MARK}S"`;
-      if (b === meter.beats - 1) pre += endBits + `"_${SIMILE_MARK}E"`;
-      parts.push(`${pre}x${meter.beatLen}`);
-    }
-    return parts.join(' ');
+      if (k === 1) pre = startBits + (first ? chordText(first) : '') + `"_${SIMILE_MARK}S"`;
+      if (k === n) pre += endBits + `"_${SIMILE_MARK}E${n}"`;
+      return pre + m;
+    });
   }
 
   const rhythm = bar.rhythm || defaultRhythm || 'slashes';
@@ -433,7 +438,7 @@ function header(song, steps) {
 // pads[i]: extra spacing after the i-th chord label (the renderer works these out).
 export function songToAbc(song, steps = 0, pads = []) {
   const meter = meterInfo(song.time);
-  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, pads, style: song.chordStyle || 'short' };
+  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, bar: 1, pads, style: song.chordStyle || 'short' };
   const out = header(song, steps);
   const key = KEYS.includes(song.key) ? song.key : 'C';
   out.push(`K:${key}`, 'V:1 stem=up');
@@ -480,11 +485,11 @@ export function songToAbc(song, steps = 0, pads = []) {
     // Note under the first bar.
     if (sec.note) items[0].extraStart = textNote('_', sec.note);
 
-    // Line breaks: chunk by bars-per-line, never leave a single bar alone.
+    // Line breaks: chunk by bars-per-line. A lone 2nd-ending bar stays with the line before it.
     const per = Math.max(1, parseInt(sec.perLine, 10) || 4);
     const chunks = [];
     for (let i = 0; i < items.length; i += per) chunks.push(items.slice(i, i + per));
-    if (chunks.length > 1 && chunks[chunks.length - 1].length === 1) {
+    if (chunks.length > 1 && chunks[chunks.length - 1].length === 1 && chunks[chunks.length - 1][0].before === '[2') {
       chunks[chunks.length - 2].push(...chunks.pop());
     }
 
@@ -503,6 +508,14 @@ export function songToAbc(song, steps = 0, pads = []) {
         if (it.before) line += `${it.before} `;
         line += barToAbc(it.bar, meter, sec.rhythm, it.extraStart || '', it.extraEnd || '', tr) + ` ${it.after} `;
       });
+      // Short line: pad with invisible bars so every bar on the chart is the same width.
+      for (let k = chunk.length; k < per; k++) {
+        const ghost = barToAbc(parseBar(''), meter, sec.rhythm, '', '', tr).replace(/!style=rhythm!B/g, 'x');
+        line += `${k === chunk.length ? `"_${FILL_MARK}"` : ''}${ghost} [|] `;
+      }
+      // Bar numbers count real bars only.
+      out.push(`%%setbarnb ${tr.bar}`);
+      tr.bar += chunk.length;
       out.push(line.trim());
       lineSections.push(song.sections.indexOf(sec));
     });

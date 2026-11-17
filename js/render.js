@@ -1,5 +1,5 @@
 // Engraves songs with abcjs, lays the lines out on pages, and exports PDFs.
-import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FONT_STYLES } from './abcgen.js';
+import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FILL_MARK, FONT_STYLES } from './abcgen.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 export const PAPER = {
@@ -91,8 +91,9 @@ function tidyLine(svg, song) {
   for (let i = 0; i + 1 < anchors.length; i += 2) {
     const xs = parseFloat(anchors[i].getAttribute('x'));
     const xe = parseFloat(anchors[i + 1].getAttribute('x'));
-    const beatW = beats > 1 ? (xe - xs) / (beats - 1) : 20;
-    const cx = (xs + xe + beatW) / 2;
+    const count = parseInt(anchors[i + 1].textContent.replace(/\D+/g, ''), 10) || beats;
+    const step = count > 1 ? (xe - xs) / (count - 1) : 20;
+    const cx = (xs + xe + step) / 2;
     const T = staffTop;
     const g = el('g', { class: 'simile', fill: '#000' });
     g.appendChild(el('polygon', { points: [[cx - 1.15 * sp, T + 3.35 * sp], [cx - 0.45 * sp, T + 3.35 * sp], [cx + 1.15 * sp, T + 0.65 * sp], [cx + 0.45 * sp, T + 0.65 * sp]].map((p) => p.join(',')).join(' ') }));
@@ -127,6 +128,28 @@ function tidyLine(svg, song) {
     // Section labels travel with the chords so they stay just above them.
     if (delta > 0) svg.querySelectorAll('text.abcjs-part').forEach((t) => t.setAttribute('y', parseFloat(t.getAttribute('y')) + delta));
   }
+  // Short line: cut off the invisible filler bars after the last real barline.
+  const bars = [...svg.querySelectorAll('.abcjs-bar')].map(box).filter(Boolean);
+  let lineRight = bars.length ? Math.max(...bars.map((b) => b.x + b.width)) : Infinity;
+  const fill = [...svg.querySelectorAll('text')].find((t) => t.textContent.includes(FILL_MARK));
+  if (fill) {
+    const fx = parseFloat(fill.getAttribute('x'));
+    fill.remove();
+    const real = bars.filter((b) => b.x < fx);
+    const vb0 = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
+    if (real.length && vb0.length === 4 && isFinite(fx)) {
+      lineRight = Math.max(...real.map((b) => b.x + b.width));
+      const newW = lineRight + 2 - vb0[0];
+      if (newW > 40 && newW < vb0[2]) {
+        svg.setAttribute('data-fullw', svg.getAttribute('width') || vb0[2]);
+        svg.setAttribute('viewBox', `${vb0[0]} ${vb0[1]} ${newW} ${vb0[3]}`);
+        svg.setAttribute('width', newW);
+        svg.setAttribute('data-trimmed', '');
+      }
+    }
+  }
+  try { fitChords(svg, chords, lineRight); } catch (e) { console.warn('fitChords', e); }
+
   // Trim empty bands above and below the line, keeping a little breathing room.
   // Measure the drawn pieces one by one (not the whole SVG, which some browsers report as empty).
   const vb = (svg.getAttribute('viewBox') || '').split(/\s+/).map(Number);
@@ -148,54 +171,28 @@ function tidyLine(svg, song) {
   svg.setAttribute('height', h);
 }
 
-// How many spacer units each chord label needs so it clears the next label
-// (or the end of the line). Returns null when nothing collides.
-const LABEL_GAP = 7;
-const UNIT = 5; // rough width one spacer adds once the line is justified
-const MIN_SCALE = 0.75; // smallest chord lettering on a crowded line
+const LABEL_GAP = 6;
+const MIN_SCALE = 0.75; // smallest a crowded chord name gets
 
-// Lines whose chord names can't all fit at full size get smaller lettering.
-function lineScales(target) {
-  return [...target.querySelectorAll('svg')].map((svg) => {
-    const chords = [...svg.querySelectorAll('text.abcjs-annotation')].filter((t) => !t.hasAttribute('data-note') && !t.textContent.includes(SIMILE_MARK));
-    if (chords.length < 2) return 1;
-    const bars = [...svg.querySelectorAll('.abcjs-bar')].map(box).filter(Boolean);
-    if (!bars.length) return 1;
-    const right = Math.max(...bars.map((b) => b.x + b.width));
-    const left = Math.min(...chords.map((t) => parseFloat(t.getAttribute('x'))));
-    const total = chords.reduce((sum, t) => sum + (box(t)?.width || 0) + LABEL_GAP, 0) * 1.08;
-    const k = (right - left) / total;
-    return isFinite(k) && k > 0 ? Math.max(MIN_SCALE, Math.min(1, k)) : 1;
+// Make each chord name fit before the next one: shrink just that name (down to 75%),
+// and if it still doesn't fit, lift it half a row so the two never collide.
+function fitChords(svg, chords, lineRight) {
+  const items = chords.map((t) => ({ t, x: parseFloat(t.getAttribute('x')), w: box(t)?.width || 0 })).filter((c) => isFinite(c.x) && c.w).sort((a, b) => a.x - b.x);
+  let lifted = false;
+  items.forEach((c, i) => {
+    const end = i + 1 < items.length ? items[i + 1].x : lineRight;
+    const room = end - c.x - LABEL_GAP;
+    if (!(room > 0) || c.w <= room) { lifted = false; return; }
+    const k = Math.max(MIN_SCALE, room / c.w);
+    const size = parseFloat(c.t.getAttribute('font-size')) || 15;
+    c.t.setAttribute('font-size', size * k);
+    if (c.w * k > room + 1 && !lifted && i + 1 < items.length) {
+      // Still too long: raise the next chord so they sit on two levels.
+      const nxt = items[i + 1].t;
+      nxt.setAttribute('y', parseFloat(nxt.getAttribute('y')) - size * 0.95);
+      lifted = true;
+    } else lifted = false;
   });
-}
-
-function chordCrowding(target, chordCount, scales) {
-  const svgs = [...target.querySelectorAll('svg')];
-  const all = [];
-  svgs.forEach((svg, li) => {
-    svg.querySelectorAll('text.abcjs-annotation').forEach((t) => {
-      if (t.hasAttribute('data-note') || t.textContent.includes(SIMILE_MARK)) return;
-      all.push({ t, li, svg });
-    });
-  });
-  if (all.length !== chordCount) return null; // can't match labels to chords; leave as drawn
-  const need = new Array(chordCount).fill(0);
-  let any = false;
-  all.forEach((c, i) => {
-    const x = parseFloat(c.t.getAttribute('x'));
-    const w = (box(c.t)?.width || 0) * (scales[c.li] || 1);
-    if (!isFinite(x) || !w) return;
-    const next = all[i + 1];
-    let limit;
-    if (next && next.li === c.li) limit = parseFloat(next.t.getAttribute('x')) - LABEL_GAP;
-    else {
-      const bars = [...c.svg.querySelectorAll('.abcjs-bar')].map(box).filter(Boolean);
-      limit = bars.length ? Math.max(...bars.map((b) => b.x + b.width)) + 4 : Infinity;
-    }
-    const over = x + w - limit;
-    if (over > 0.5) { need[i] = Math.ceil(over / UNIT); any = true; }
-  });
-  return any ? need : null;
 }
 
 // Render one song. Returns { pages: [svgElement], warnings, abc, key }.
@@ -241,27 +238,10 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
 
   // Chord names take no room on their own, so a long one can run into the next.
   // Measure, give the crowded spots more room, and redraw (a few rounds at most).
-  let pads = [];
-  draw(pads);
-  // Decide lettering size per line from the first drawing (line breaks don't change).
-  let scales = [];
-  try { if (!raw) scales = lineScales(target); } catch (e) { console.warn('lineScales', e); }
-  for (let round = 0; round < 6 && !raw; round++) {
-    let more = null;
-    try { more = chordCrowding(target, chordCount, scales); } catch (e) { console.warn('chordCrowding', e); }
-    if (!more) break;
-    pads = pads.slice();
-    more.forEach((n, i) => { if (n) pads[i] = (pads[i] || 0) + n; });
-    draw(pads);
-  }
-  [...target.querySelectorAll('svg')].forEach((svg, li) => {
-    const k = scales[li] || 1;
-    if (k >= 1) return;
-    svg.querySelectorAll('text.abcjs-annotation').forEach((t) => {
-      if (t.hasAttribute('data-note')) return;
-      t.setAttribute('font-size', (parseFloat(t.getAttribute('font-size')) || 18) * k);
-    });
-  });
+  // Every bar keeps the same width (easier to follow on a gig); crowded chord
+  // names are lettered smaller rather than widening their bar.
+  draw([]);
+  void chordCount;
   if (tunes[0] && tunes[0].warnings) {
     for (const w of tunes[0].warnings.slice(0, 5)) warnings.push(String(w).replace(/<[^>]+>/g, ''));
   }
@@ -272,11 +252,12 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
 
   const lines = [...target.querySelectorAll('svg')].map((s) => {
     const w = parseFloat(s.getAttribute('width')) || contentW;
+    const fullW = parseFloat(s.getAttribute('data-fullw')) || w;
     let h = parseFloat(s.getAttribute('height'));
     if (!(h > 0)) h = 50;
     // abcjs gives each line its own viewBox (offset down the original tune); keep it.
     const viewBox = s.getAttribute('viewBox') || `0 0 ${w} ${h}`;
-    return { svg: s, w, h, viewBox };
+    return { svg: s, w, fullW, h, viewBox };
   });
   const headerCount = Math.max(0, lines.length - lineSections.length);
 
@@ -295,7 +276,7 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
   start();
   let lastSection = null;
   lines.forEach((line, i) => {
-    const scale = contentW / line.w;
+    const scale = contentW / line.fullW;
     const h = line.h * scale;
     const secIndex = i >= headerCount ? lineSections[i - headerCount] : null;
     const sec = secIndex != null && secIndex >= 0 ? song.sections[secIndex] : null;
@@ -309,9 +290,10 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
     nested.setAttribute('viewBox', line.viewBox);
     nested.setAttribute('x', MARGIN);
     nested.setAttribute('y', y);
-    nested.setAttribute('width', contentW);
+    nested.setAttribute('width', line.w * scale);
     nested.setAttribute('height', h);
-    nested.setAttribute('overflow', 'visible');
+    // Trimmed short lines are clipped so the hidden filler bars' staff doesn't show.
+    nested.setAttribute('overflow', nested.hasAttribute('data-trimmed') ? 'hidden' : 'visible');
     page.appendChild(nested);
     y += h;
   });
