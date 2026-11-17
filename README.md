@@ -19,7 +19,7 @@ A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Typ
 
   Each section has options for repeat, "play × times", 1st/2nd endings, a note under the first bar, bars per line, and "start on a new page".
 - **Chord pad:** tap into a chord box and a pad appears with `|` for bar lines, the chords in the song's key (with roman numerals), common outside chords (♭VII, II, iv…), chord types (7, m7, sus4… tap again to undo), `/` for slash chords, and all 12 roots for anything else. On phones the keyboard stays hidden; tap ⌨ to type instead.
-- **Chord symbols:** choose Standard (Cmaj7, Cm7, Cm7♭5) or Shorthand (CΔ7, C-7, Cø7, C°7, C+) per song. Either style can be typed (`CΔ7`, `C^7`, `CM7`, `C-7`, `Cø`, `C°7`, `C+`) and prints in the chosen style.
+- **Chord symbols:** choose Standard (Cmaj7, Cm7, Cm7♭5) or Shorthand (CΔ7, C-7, Cø7, C°7, C+) per song. Either style can be typed (`CM7`, `Cmaj7`, `CΔ7` = maj7; `CM`, `Cmaj`, `CΔ` = major; `Cmin`, `C-` = minor; `Cø`; `C°`; `C+`, `C+5`; `C5` power chord) and prints in the chosen style.
 - **Transpose** with the − / + buttons. The key signature, chords and any written notes all move.
 - **Gigs → + New gig.** Add songs, put them in order, and transpose any song for that gig only. **PDF** makes one file with a setlist page and every chart.
 - **PDF** → *Share / Save to Files / Print*, or use **Print** directly.

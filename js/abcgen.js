@@ -48,17 +48,20 @@ export const CHORD_STYLES = {
 };
 
 // Accept shorthand as typed and store/transpose one spelling:
-// CΔ7 C^7 CM7 → Cmaj7 · C-7 → Cm7 · Cø → Cm7b5 · C°7 → Cdim7 · C+ → Caug
+// CΔ7 CM7 → Cmaj7 · CM CΔ Cmaj → C · Cmin7 C-7 → Cm7 · Cø → Cm7b5 · C°7 → Cdim7 · C+ C+5 → Caug
 export function canonicalChord(chord) {
   const m = /^([A-G][#b]?)(.*?)(\/[A-G][#b]?)?$/.exec(chord);
   if (!m) return chord;
   let q = m[2].replace(/△/g, 'Δ').replace(/−/g, '-').replace(/Ø/g, 'ø');
-  q = q.replace(/^-/, 'm');
+  q = q.replace(/^min(?!or)/, 'm').replace(/^-/, 'm');
   q = q.replace(/^m(?:Maj|maj|Δ|\^|M)7?/, 'm(maj7)');
-  if (/^(?:Δ|\^)/.test(q)) { const r = q.slice(1); q = 'maj' + (r === '' ? '7' : r); }
+  // Major indicators: on their own they mean a plain major chord (CM, Cmaj, CΔ = C);
+  // with a number they mean major 7th and up (CM7, Cmaj7, CΔ7 = Cmaj7; CΔ9 = Cmaj9).
+  if (/^(?:Δ|\^)/.test(q)) q = 'maj' + q.slice(1);
   else if (/^Maj/.test(q)) q = 'maj' + q.slice(3);
-  else if (/^M(?=\d|$)/.test(q)) { const r = q.slice(1); q = 'maj' + (r === '' ? '7' : r); }
-  q = q.replace(/^ø7?/, 'm7b5').replace(/^°/, 'dim').replace(/^\+/, 'aug');
+  else if (/^M(?=\d|$)/.test(q)) q = 'maj' + q.slice(1);
+  if (q === 'maj') q = '';
+  q = q.replace(/^ø7?/, 'm7b5').replace(/^°/, 'dim').replace(/^\+5?/, 'aug');
   return m[1] + q + (m[3] || '');
 }
 

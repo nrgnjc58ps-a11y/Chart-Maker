@@ -63,8 +63,8 @@ export function roots(key) {
 }
 
 const pretty = prettyChord;
-const MODS = ['m', '7', 'm7', 'maj7', 'm7b5', 'dim7', 'sus4', 'sus2', '7sus4', 'add9', '6', '9', 'dim', 'aug'];
-const SHORT_LABEL = { m: '-', m7: '-7', maj7: 'Δ7', m7b5: 'ø7', dim7: '°7', dim: '°', aug: '+' };
+const MODS = ['m', '7', 'maj7', 'm7b5', 'dim7', '5', 'sus4', 'sus2', '7sus4', 'add9', '6', '9', 'dim', 'aug'];
+const SHORT_LABEL = { m: '-', maj7: 'Δ7', m7b5: 'ø7', dim7: '°7', dim: '°', aug: '+' };
 
 // ---------------------------------------------------------------- editing
 function ctx(field) {
