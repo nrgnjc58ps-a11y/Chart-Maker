@@ -578,7 +578,7 @@ export function songToAbc(song, steps = 0, pads = []) {
     if (isLast && end2.length) lastItem.after = '|]';
 
     // Note under the first bar.
-    if (sec.note) items[0].extraStart = textNote('_', sec.note);
+    if (sec.note) items[0].extraStart = textNote('^', sec.note);
 
     // Line breaks: chunk by bars-per-line, so every line keeps the 4-bar grid. A lone
     // 2nd ending starts the next line, unless the section asks to keep endings together.
