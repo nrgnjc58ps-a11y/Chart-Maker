@@ -1,5 +1,5 @@
 // Engraves songs with abcjs, lays the lines out on pages, and exports PDFs.
-import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FILL_MARK, FONT_STYLES } from './abcgen.js';
+import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FILL_MARK, TIMES_MARK, FONT_STYLES } from './abcgen.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 export const PAPER = {
@@ -153,6 +153,7 @@ function tidyLine(svg, song) {
     }
   }
   try { fitChords(svg, chords, lineRight); } catch (e) { console.warn('fitChords', e); }
+  try { placeTimes(svg, chords, lineYs.length ? lineYs[lineYs.length - 1] : staffTop + 4 * sp); } catch (e) { console.warn('placeTimes', e); }
 
   // Trim empty bands above and below the line, keeping a little breathing room.
   // Measure the drawn pieces one by one (not the whole SVG, which some browsers report as empty).
@@ -236,6 +237,31 @@ function equaliseBars(svg, fillX, missing) {
     }
   });
   return newB[n] + last.width;
+}
+
+// "x4" for a repeated section: bold, about chord size, right under the end repeat sign.
+function placeTimes(svg, chords, staffBottom) {
+  const marks = [...svg.querySelectorAll('text')].filter((t) => t.textContent.includes(TIMES_MARK));
+  if (!marks.length) return;
+  const ref = chords[0];
+  const size = (parseFloat(ref?.getAttribute('font-size')) || 16) * 1.15;
+  const family = ref?.getAttribute('font-family');
+  const bars = [...svg.querySelectorAll('g.abcjs-bar')].map(box).filter(Boolean);
+  marks.forEach((t) => {
+    const label = t.textContent.split(TIMES_MARK).join('');
+    t.textContent = label;
+    const x = parseFloat(t.getAttribute('x'));
+    const next = bars.filter((b) => b.x + b.width >= x).sort((a, b) => a.x - b.x)[0];
+    if (next) {
+      t.setAttribute('x', next.x + next.width);
+      t.setAttribute('text-anchor', 'end');
+    }
+    t.setAttribute('y', staffBottom + size + 2);
+    t.setAttribute('font-size', size);
+    t.setAttribute('font-weight', 'bold');
+    if (family) t.setAttribute('font-family', family);
+    t.setAttribute('class', `${t.getAttribute('class') || ''} times-mark`.trim());
+  });
 }
 
 // Make each chord name fit before the next one: shrink just that name (down to 75%),

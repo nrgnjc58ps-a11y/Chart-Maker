@@ -221,6 +221,8 @@ export const TEXT_MARK = '\u2060';
 export const SIMILE_MARK = '\u2063';
 // Marks where invisible filler bars start on a short line (the renderer trims them off).
 export const FILL_MARK = '\u2064';
+// Marks the "x4" of a repeated section (drawn bold under the end repeat sign).
+export const TIMES_MARK = '\u2061';
 
 const SHARPS = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
 const FLATS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -546,7 +548,7 @@ export function songToAbc(song, steps = 0, pads = []) {
         end1.forEach((b) => items.push({ bar: b, after: '|', before: '' }));
         items[first].before = '[1';
         items[items.length - 1].after = ':|';
-        if (timesText) items[items.length - 1].extraEnd = textNote('^', timesText);
+        if (timesText) items[items.length - 1].extraEnd = `"_${TIMES_MARK}${timesText}"`;
         if (end2.length) {
           const second = items.length;
           end2.forEach((b) => items.push({ bar: b, after: '|', before: '' }));
@@ -554,7 +556,7 @@ export function songToAbc(song, steps = 0, pads = []) {
         }
       } else {
         items[items.length - 1].after = ':|';
-        if (timesText) items[items.length - 1].extraEnd = textNote('^', timesText);
+        if (timesText) items[items.length - 1].extraEnd = `"_${TIMES_MARK}${timesText}"`;
       }
     }
     // Pushes onto beat 1 ("| ^F"): the chord comes in on the last eighth of the bar before.
