@@ -206,9 +206,11 @@ const textNote = (pos, t) => `"${pos}${TEXT_MARK}${abcText(t)}"`;
 
 
 function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
-  const chordText = (c) => `"^${c.split(/\s+/).map((x) => prettyChord(transposeChord(x, tr.steps, tr.key))).join('  ')}"`;
+  const chordText = (c) => {
+    tr.ord++;
+    return `"^${c.split(/\s+/).map((x) => prettyChord(transposeChord(x, tr.steps, tr.key))).join('  ')}"`;
+  };
   const chords = placeChords(bar.beats, meter.beats);
-  const chordAt = (i) => (chords[i] ? chordText(chords[i]) : '');
   const startBits = extraStart + bar.startDecos.join('') + bar.above.map((t) => textNote('^', t)).join('');
   const endBits = extraEnd + bar.endText.map((t) => textNote('^', t)).join('') + bar.endDecos.join('');
   const cresc = bar.hairpin === 'cresc' ? ['!<(!', '!<)!'] : bar.hairpin === 'dim' ? ['!>(!', '!>)!'] : ['', ''];
@@ -236,10 +238,9 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
   const rhythm = bar.rhythm || defaultRhythm || 'slashes';
   const notes = []; // {chord, len, beam}
   if (rhythm === 'whole') {
-    notes.push({ chord: chordAt(0), len: meter.barLen, sep: ' ' });
-    // Later chords in a one-slash bar would be lost: attach them as text.
-    const later = chords.slice(1).filter(Boolean);
-    if (later.length) notes[0].chord += `"^${later.map((c) => abcText(prettyChord(transposeChord(c, tr.steps, tr.key)))).join('   ')}"`;
+    // One slash: any later chords share its label.
+    const all = chords.filter(Boolean);
+    notes.push({ chord: all.length ? all.join('   ') : null, len: meter.barLen, sep: ' ' });
   } else {
     for (let b = 0; b < meter.beats; b++) {
       if (rhythm === 'eighths') {
@@ -248,15 +249,30 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
         for (let s = 0; s < n; s++) {
           // Beam 2 beats together in simple meters with an even beat count (4/4 → 4+4).
           const groupEnd = meter.sub === 3 ? s === n - 1 : s === n - 1 && (meter.beats % 2 === 1 || b % 2 === 1);
-          notes.push({ chord: s === 0 ? chordAt(b) : '', len, sep: groupEnd ? ' ' : '' });
+          notes.push({ chord: s === 0 ? chords[b] : null, len, sep: groupEnd ? ' ' : '' });
         }
       } else if (rhythm === 'quarters') {
-        notes.push({ chord: chordAt(b), len: meter.beatLen, sep: ' ' });
+        notes.push({ chord: chords[b], len: meter.beatLen, sep: ' ' });
       } else {
-        notes.push({ chord: chordAt(b), len: 0, sep: ' ' });
+        notes.push({ chord: chords[b], len: 0, sep: ' ' });
       }
     }
   }
+  // Chord labels, and extra room after a label that would run into the next one.
+  notes.forEach((n) => {
+    n.label = n.chord ? chordText(n.chord) : '';
+    n.ord = n.chord ? tr.ord - 1 : -1;
+    n.space = 0;
+  });
+  notes.forEach((n, i) => {
+    const pad = n.ord >= 0 ? tr.pads[n.ord] || 0 : 0;
+    if (!pad) return;
+    let end = i + 1;
+    while (end < notes.length && !notes[end].chord) end++;
+    // Spread the room over the gaps between this chord and the next one (or the barline).
+    const gaps = end - i;
+    for (let k = 0; k < pad; k++) notes[i + (k % gaps)].space++;
+  });
   let s = '';
   notes.forEach((n, i) => {
     let pre = '';
@@ -265,7 +281,8 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
     if (i === notes.length - 1) pre += endBits;
     let post = '';
     if (i === notes.length - 1 && cresc[1]) post = cresc[1];
-    s += `${pre}${n.chord}${RHY}B${n.len}${post}${n.sep}`;
+    const room = n.space ? (n.sep ? ' ' : '') + Array(n.space).fill('y').join(n.sep ? ' ' : '') : '';
+    s += `${pre}${n.label}${RHY}B${n.len}${post}${room}${n.sep}`;
   });
   return s.trim();
 }
@@ -372,9 +389,10 @@ function header(song, steps) {
 }
 
 // Returns { abc, lineSections: [sectionIndex per music line], warnings }
-export function songToAbc(song, steps = 0) {
+// pads[i]: extra spacing after the i-th chord label (the renderer works these out).
+export function songToAbc(song, steps = 0, pads = []) {
   const meter = meterInfo(song.time);
-  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps) };
+  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, pads };
   const out = header(song, steps);
   const key = KEYS.includes(song.key) ? song.key : 'C';
   out.push(`K:${key}`, 'V:1 stem=up');
@@ -453,5 +471,5 @@ export function songToAbc(song, steps = 0) {
     out.push(`${RHY}B0 ${RHY}B0 ${RHY}B0 ${RHY}B0 |]`);
     lineSections.push(-1);
   }
-  return { abc: out.join('\n') + '\n', lineSections, warnings };
+  return { abc: out.join('\n') + '\n', lineSections, warnings, chordCount: tr.ord };
 }
