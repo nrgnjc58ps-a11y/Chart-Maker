@@ -122,8 +122,30 @@ function homeTabs(active) {
   return `<nav class="tabs"><a href="#/" class="${active === 'songs' ? 'on' : ''}">Songs (${state.songs.length})</a><a href="#/gigs" class="${active === 'gigs' ? 'on' : ''}">Gigs (${state.gigs.length})</a></nav>`;
 }
 
+// Select mode on the Songs / Gigs lists (for deleting several at once).
+let selecting = null; // 'songs' | 'gigs' | null
+const selected = new Set();
+
+function selectBar(kind) {
+  const n = selected.size;
+  return `<div class="select-bar">
+    <button class="btn small" data-act="select-all" data-kind="${kind}">Select all</button>
+    <span class="grow muted small">${n} selected</span>
+    <button class="btn danger-fill" data-act="delete-selected" data-kind="${kind}" ${n ? '' : 'disabled'}>Delete${n ? ` (${n})` : ''}</button>
+  </div>`;
+}
+
+function listTopbar(kind) {
+  const isSel = selecting === kind;
+  const has = kind === 'songs' ? state.songs.length : state.gigs.length;
+  const sel = has ? `<button class="tbtn" data-act="${isSel ? 'select-done' : 'select-start'}" data-kind="${kind}">${isSel ? 'Done' : 'Select'}</button>` : '';
+  const add = isSel ? '' : (kind === 'songs' ? '<button class="tbtn primary" data-act="new-song">+ New song</button>' : '<button class="tbtn primary" data-act="new-gig">+ New gig</button>');
+  topbar({ left: sel, right: add });
+}
+
 function viewSongs(filter = '') {
-  topbar({ right: '<button class="tbtn primary" data-act="new-song">+ New song</button>' });
+  if (selecting !== 'songs') { selecting = null; selected.clear(); }
+  listTopbar('songs');
   const songs = [...state.songs].sort((a, b) => (a.title || '').localeCompare(b.title || ''));
   app.innerHTML = `
     ${homeTabs('songs')}
@@ -131,20 +153,63 @@ function viewSongs(filter = '') {
       <input type="search" id="song-search" placeholder="Search songs" value="${esc(filter)}" ${NO_AUTO}>
       <ul class="list" id="song-list" style="margin-top:8px"></ul>
     </div>
-    ${settingsCard()}`;
+    ${selecting === 'songs' ? selectBar('songs') : settingsCard()}`;
   const list = $('#song-list');
   const draw = (q) => {
     const ql = q.trim().toLowerCase();
     const shown = songs.filter((s) => !ql || `${s.title} ${s.composer}`.toLowerCase().includes(ql));
-    list.innerHTML = shown.length ? shown.map((s) => `
-      <li><a class="list-item" href="#/song/${s.id}">
-        <div class="grow"><div class="title">${esc(s.title || 'Untitled')}</div><div class="meta">${esc(s.composer || '')}${s.tempo ? ` · ♩=${esc(s.tempo)}` : ''}</div></div>
-        <span class="pill">${esc(transposeKeyName(s.key, s.transpose || 0))}</span>
-      </a></li>`).join('') : (state.songs.length ? '<li class="empty">No songs match.</li>' : `<li class="empty">No songs yet. Tap “+ New song”, or start from an example chart.<br><button class="btn" data-act="add-example" style="margin-top:10px">Add example: Shape of a Heart</button></li>`);
+    const row = (s) => `
+        <div class="grow"><div class="title">${esc(s.title || 'Untitled')}</div><div class="meta">${esc(s.composer || '')}${s.tempo ? ` · ${esc(s.tempo)} bpm` : ''}</div></div>
+        <span class="pill">${esc(transposeKeyName(s.key, s.transpose || 0))}</span>`;
+    list.innerHTML = shown.length ? shown.map((s) => (selecting === 'songs'
+      ? `<li><label class="list-item select-row"><input type="checkbox" data-select="${s.id}" ${selected.has(s.id) ? 'checked' : ''}>${row(s)}</label></li>`
+      : `<li><a class="list-item" href="#/song/${s.id}">${row(s)}</a></li>`)).join('')
+      : (state.songs.length ? '<li class="empty">No songs match.</li>' : `<li class="empty">No songs yet. Tap “+ New song”, or start from an example chart.<br><button class="btn" data-act="add-example" style="margin-top:10px">Add example: Shape of a Heart</button></li>`);
   };
   draw(filter);
   $('#song-search').addEventListener('input', (e) => draw(e.target.value));
   bindSettings();
+}
+
+app.addEventListener('change', (e) => {
+  const id = e.target.dataset?.select;
+  if (!id) return;
+  e.target.checked ? selected.add(id) : selected.delete(id);
+  const bar = $('.select-bar');
+  if (bar) bar.outerHTML = selectBar(selecting);
+});
+
+function gigsUsing(songIds) {
+  return state.gigs.filter((g) => g.items.some((it) => songIds.includes(it.songId)));
+}
+
+// Delete songs after asking; also takes them out of any gig setlists.
+async function deleteSongs(ids) {
+  if (!ids.length) return false;
+  const names = ids.map((id) => store.findSong(id)?.title || 'Untitled');
+  const gigs = gigsUsing(ids);
+  const what = ids.length === 1 ? `“${names[0]}”` : `${ids.length} songs`;
+  const inGigs = ids.filter((id) => gigs.some((g) => g.items.some((it) => it.songId === id))).length;
+  const who = ids.length === 1 ? 'It’s' : inGigs === ids.length ? 'They’re' : `${inGigs} of them ${inGigs === 1 ? 'is' : 'are'}`;
+  const gigNote = gigs.length ? ` ${who} in ${gigs.length} gig${gigs.length === 1 ? '' : 's'} (${gigs.map((g) => g.name || 'Untitled').slice(0, 3).join(', ')}${gigs.length > 3 ? '…' : ''}) and will be taken off ${gigs.length === 1 ? 'that setlist' : 'those setlists'}.` : '';
+  const ok = await askConfirm(`Delete ${what}?${gigNote} This can’t be undone.`, ids.length === 1 ? 'Delete song' : `Delete ${ids.length} songs`);
+  if (!ok) return false;
+  state.songs = state.songs.filter((s) => !ids.includes(s.id));
+  gigs.forEach((g) => { g.items = g.items.filter((it) => !ids.includes(it.songId)); });
+  store.save(true);
+  toast(ids.length === 1 ? `Deleted “${names[0]}”` : `Deleted ${ids.length} songs`);
+  return true;
+}
+
+async function deleteGigs(ids) {
+  if (!ids.length) return false;
+  const what = ids.length === 1 ? `the gig “${store.findGig(ids[0])?.name || 'Untitled'}”` : `${ids.length} gigs`;
+  const ok = await askConfirm(`Delete ${what}? The songs stay in your library.`, ids.length === 1 ? 'Delete gig' : `Delete ${ids.length} gigs`);
+  if (!ok) return false;
+  state.gigs = state.gigs.filter((g) => !ids.includes(g.id));
+  store.save(true);
+  toast(ids.length === 1 ? 'Gig deleted' : `Deleted ${ids.length} gigs`);
+  return true;
 }
 
 function settingsCard() {
@@ -273,6 +338,7 @@ function drawEditPane(song) {
         <p class="small muted">ABC notation guide: <a href="https://abcnotation.com/wiki/abc:standard:v2.1" target="_blank" rel="noopener">abcnotation.com</a></p>`
     : '<p class="small muted">For the odd bar of real notation you don’t need this — use <code>{…}</code> inside a bar (see “How to type bars”).</p>'}
     </div>
+    <div class="row" style="margin:4px 0 20px"><span class="grow"></span><button class="btn danger" data-act="song-del">Delete this song</button></div>
     <datalist id="section-names">${SECTION_NAMES.map((n) => `<option value="${n}">`).join('')}</datalist>`;
   requestAnimationFrame(growAll);
 }
@@ -403,17 +469,19 @@ function currentGig() {
 
 // ---------- gigs ----------
 function viewGigs() {
-  topbar({ right: '<button class="tbtn primary" data-act="new-gig">+ New gig</button>' });
+  if (selecting !== 'gigs') { selecting = null; selected.clear(); }
+  listTopbar('gigs');
   const gigs = [...state.gigs].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  const row = (g) => `
+        <div class="grow"><div class="title">${esc(g.name || 'Untitled gig')}</div><div class="meta">${esc([g.date, g.venue].filter(Boolean).join(' · '))}</div></div>
+        <span class="pill">${g.items.length} song${g.items.length === 1 ? '' : 's'}</span>`;
   app.innerHTML = `
     ${homeTabs('gigs')}
-    <div class="card"><ul class="list">${gigs.length ? gigs.map((g) => `
-      <li><a class="list-item" href="#/gig/${g.id}">
-        <div class="grow"><div class="title">${esc(g.name || 'Untitled gig')}</div><div class="meta">${esc([g.date, g.venue].filter(Boolean).join(' · '))}</div></div>
-        <span class="pill">${g.items.length} song${g.items.length === 1 ? '' : 's'}</span>
-      </a></li>`).join('') : '<li class="empty">No gigs yet. Tap “+ New gig” to build a setlist and print every chart in one PDF.</li>'}
+    <div class="card"><ul class="list">${gigs.length ? gigs.map((g) => (selecting === 'gigs'
+      ? `<li><label class="list-item select-row"><input type="checkbox" data-select="${g.id}" ${selected.has(g.id) ? 'checked' : ''}>${row(g)}</label></li>`
+      : `<li><a class="list-item" href="#/gig/${g.id}">${row(g)}</a></li>`)).join('') : '<li class="empty">No gigs yet. Tap “+ New gig” to build a setlist and print every chart in one PDF.</li>'}
     </ul></div>
-    ${settingsCard()}`;
+    ${selecting === 'gigs' ? selectBar('gigs') : settingsCard()}`;
   bindSettings();
 }
 
@@ -691,14 +759,7 @@ document.addEventListener('click', (e) => {
           const blob = new Blob([JSON.stringify({ app: 'chart-maker', song }, null, 1)], { type: 'application/json' });
           saveFile(blob, name);
         }
-        if (m === 'del') {
-          askConfirm(`Delete “${song.title || 'this song'}”? This can’t be undone.`).then((ok) => {
-            if (!ok) return;
-            state.songs = state.songs.filter((s) => s.id !== song.id);
-            store.save(true);
-            navigate('/');
-          });
-        }
+        if (m === 'del') deleteSongs([song.id]).then((ok) => ok && navigate('/'));
       });
       break;
     }
@@ -735,13 +796,34 @@ document.addEventListener('click', (e) => {
       printPages(gigPages(gig));
       break;
     case 'gig-del':
-      askConfirm(`Delete the gig “${gig.name || 'Untitled'}”? Songs stay in your library.`).then((ok) => {
+      deleteGigs([gig.id]).then((ok) => ok && navigate('/gigs'));
+      break;
+    case 'song-del':
+      deleteSongs([song.id]).then((ok) => ok && navigate('/'));
+      break;
+    case 'select-start':
+      selecting = btn.dataset.kind; selected.clear(); route();
+      break;
+    case 'select-done':
+      selecting = null; selected.clear(); route();
+      break;
+    case 'select-all': {
+      const ids = (btn.dataset.kind === 'songs' ? state.songs : state.gigs).map((x) => x.id);
+      const all = ids.every((id) => selected.has(id));
+      ids.forEach((id) => (all ? selected.delete(id) : selected.add(id)));
+      route();
+      break;
+    }
+    case 'delete-selected': {
+      const ids = [...selected];
+      (btn.dataset.kind === 'songs' ? deleteSongs(ids) : deleteGigs(ids)).then((ok) => {
         if (!ok) return;
-        state.gigs = state.gigs.filter((g) => g.id !== gig.id);
-        store.save(true);
-        navigate('/gigs');
+        selected.clear();
+        if (!(btn.dataset.kind === 'songs' ? state.songs.length : state.gigs.length)) selecting = null;
+        route();
       });
       break;
+    }
   }
 });
 

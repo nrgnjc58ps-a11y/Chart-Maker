@@ -216,3 +216,13 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
 .pk.pk-long { font-size: 13px; letter-spacing: -.02em; }
 .pk-rep { font-size: 20px; }
 .pk-tools .pk small { font-size: 9px; }
+
+/* Select mode on lists */
+.select-row { cursor: pointer; }
+.select-row input[type=checkbox] { width: 24px; height: 24px; accent-color: var(--accent); flex: none; }
+.select-bar {
+  position: sticky; bottom: 0; z-index: 15; display: flex; gap: 10px; align-items: center;
+  background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); box-shadow: 0 -4px 14px rgba(0,0,0,.1);
+}
+.btn.danger-fill:disabled { opacity: .45; }
