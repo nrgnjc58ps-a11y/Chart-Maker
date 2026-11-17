@@ -1,7 +1,7 @@
 import * as store from './store.js';
-import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
+import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
-import { renderSong, pagesToPdf, loadFonts, PAPER } from './render.js';
+import { renderSong, pagesToPdf, loadFonts, setChordSize, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -197,6 +197,9 @@ function settingsSheet() {
         <label class="field">Paper size
           <select id="paper">${Object.entries(PAPER).map(([k, p]) => `<option value="${k}" ${state.prefs.paper === k ? 'selected' : ''}>${p.label}</option>`).join('')}</select>
         </label>
+        <label class="field">Chord size
+          <select id="chord-size">${Object.entries(CHORD_SIZES).map(([k, c]) => `<option value="${k}" ${(state.prefs.chordSize || 'medium') === k ? 'selected' : ''}>${c.label}</option>`).join('')}</select>
+        </label>
       </div>
       <p class="small muted">${store.storageMode() === 'account'
         ? 'Your songs are saved privately to your Claude account, so they’re here whenever you open this page. A backup file is still a good idea.'
@@ -211,6 +214,7 @@ function settingsSheet() {
 }
 
 function bindSettings() {
+  $('#chord-size')?.addEventListener('change', (e) => { state.prefs.chordSize = e.target.value; setChordSize(e.target.value); store.save(); toast(`Chord size: ${CHORD_SIZES[e.target.value].label}`); });
   $('#paper')?.addEventListener('change', (e) => { state.prefs.paper = e.target.value; store.save(); toast(`Paper: ${PAPER[e.target.value].label}`); });
   $('#restore')?.addEventListener('change', async (e) => {
     const f = e.target.files[0];
@@ -657,6 +661,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   app.innerHTML = '<div class="spinner" style="margin-top:40px"></div><p class="empty">Opening your charts…</p>';
   store.setSaveErrorHandler(() => toast('Couldn’t save that change. Check your connection.'));
   state = await store.load();
+  setChordSize(state.prefs.chordSize);
   initPalette(() => currentSong()?.key || 'C', () => currentSong()?.chordStyle || 'short', (style) => {
     const song = currentSong();
     if (!song) return;

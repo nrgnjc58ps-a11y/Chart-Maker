@@ -394,6 +394,9 @@ export function infoLine(song, steps = 0) {
   return bits.join('   ·   ');
 }
 
+export const CHORD_SIZES = { small: { label: 'Small', px: 13 }, medium: { label: 'Medium', px: 15 }, large: { label: 'Large', px: 18 } };
+const chordFont = (f, song) => f.gchord.replace(/\d+$/, String((CHORD_SIZES[song.chordSize] || CHORD_SIZES.medium).px));
+
 function header(song, steps) {
   const f = FONT_STYLES[song.style] || FONT_STYLES.hand;
   const lines = [
@@ -417,8 +420,8 @@ function header(song, steps) {
     `%%titlefont ${f.title}`,
     `%%composerfont ${f.composer}`,
     `%%partsfont ${f.parts}`,
-    `%%gchordfont ${f.gchord}`,
-    `%%annotationfont ${f.gchord}`,
+    `%%gchordfont ${chordFont(f, song)}`,
+    `%%annotationfont ${chordFont(f, song)}`,
     `%%tempofont ${f.tempo}`,
     `%%measurefont ${f.measure}`,
     '%%partsbox 0',

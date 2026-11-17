@@ -26,7 +26,7 @@ export async function loadFonts() {
 
 let workArea;
 function getWorkArea() {
-  if (!workArea) {
+  if (!workArea || !workArea.isConnected) {
     workArea = document.createElement('div');
     workArea.setAttribute('aria-hidden', 'true');
     workArea.style.cssText = 'position:absolute;left:-20000px;top:0;visibility:hidden;pointer-events:none;';
@@ -55,6 +55,10 @@ function pageHeader(svg, paper, pageNo, title, style) {
   svg.appendChild(el('text', { x: MARGIN, y: MARGIN + 6, 'font-family': font, 'font-size': 20, fill: '#000' }, String(pageNo)));
   svg.appendChild(el('text', { x: paper.w - MARGIN, y: MARGIN + 6, 'font-family': font, 'font-size': 14, fill: '#444', 'text-anchor': 'end' }, title));
 }
+
+// Chord lettering size for every chart (set from the app's settings).
+let chordSize = 'medium';
+export const setChordSize = (size) => { chordSize = size || 'medium'; };
 
 const CHORD_GAP = 6; // px between chord baseline and the top staff line (before page scaling)
 
@@ -205,7 +209,7 @@ export function renderSong(song, { paper: paperName = 'letter', transpose } = {}
   let abc, lineSections = [], warnings = [], target, tunes, chordCount = 0;
 
   const draw = (pads) => {
-    if (raw) { abc = song.raw; lineSections = []; warnings = []; } else ({ abc, lineSections, warnings, chordCount } = songToAbc(song, steps, pads));
+    if (raw) { abc = song.raw; lineSections = []; warnings = []; } else ({ abc, lineSections, warnings, chordCount } = songToAbc({ ...song, chordSize: chordSize }, steps, pads));
     host.innerHTML = '';
     target = document.createElement('div');
     target.style.width = Math.round(contentW / ZOOM) + 'px';
