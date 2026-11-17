@@ -1,4 +1,7 @@
-// Song library + gigs, saved in this device's browser storage.
+// Song library + gigs.
+// Two places to keep them:
+//  - "local": this browser's storage (the normal hosted app, e.g. GitHub Pages)
+//  - "account": the viewer's private storage when the app runs as a claude.ai Artifact
 const KEY = 'chartmaker.v1';
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
@@ -37,11 +40,48 @@ function defaultPaper() {
 }
 
 function blank() {
-  return { version: 1, songs: [exampleSong()], gigs: [], prefs: { paper: defaultPaper() } };
+  return { version: 1, songs: [], gigs: [], prefs: { paper: defaultPaper() } };
 }
 
 let state;
-export function load() {
+let mode = 'local';
+let coll = null; // account collection
+const written = new Map(); // doc id -> JSON last written, so only changes are sent
+
+export const storageMode = () => mode;
+export const inArtifact = () => !!(window.claude && typeof window.claude.use === 'function');
+
+const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+
+export async function load() {
+  if (inArtifact()) {
+    try {
+      const pair = await withTimeout(Promise.all([window.claude.use('db'), window.claude.use('user')]), 10000);
+      const [db, user] = pair || [];
+      if (db && user) {
+        const id = await user.id();
+        coll = db.collection('data/users/' + id);
+        const snap = await withTimeout(coll.get(), 10000);
+        if (snap) {
+          mode = 'account';
+          state = blank();
+          for (const d of snap.docs) {
+            const body = d.data();
+            if (!body || typeof body.json !== 'string') continue;
+            written.set(d.id, body.json);
+            const value = JSON.parse(body.json);
+            if (body.kind === 'song') state.songs.push(value);
+            else if (body.kind === 'gig') state.gigs.push(value);
+            else if (body.kind === 'prefs') state.prefs = value;
+          }
+          return state;
+        }
+      }
+    } catch (e) {
+      console.warn('Account storage unavailable', e);
+    }
+  }
+  mode = 'local';
   try {
     const raw = localStorage.getItem(KEY);
     state = raw ? JSON.parse(raw) : blank();
@@ -54,13 +94,36 @@ export function load() {
   return state;
 }
 
+let onSaveError = () => {};
+export const setSaveErrorHandler = (fn) => { onSaveError = fn; };
+
+async function writeAccount() {
+  const docs = new Map();
+  state.songs.forEach((x) => docs.set('song_' + x.id, { kind: 'song', json: JSON.stringify(x) }));
+  state.gigs.forEach((x) => docs.set('gig_' + x.id, { kind: 'gig', json: JSON.stringify(x) }));
+  docs.set('prefs', { kind: 'prefs', json: JSON.stringify(state.prefs) });
+  for (const [id, body] of docs) {
+    if (written.get(id) === body.json) continue;
+    try { await coll.doc(id).set(body); written.set(id, body.json); } catch (e) { console.warn('Save failed', id, e); onSaveError(e); }
+  }
+  for (const id of [...written.keys()]) {
+    if (docs.has(id)) continue;
+    try { await coll.doc(id).delete(); written.delete(id); } catch (e) { console.warn('Delete failed', id, e); }
+  }
+}
+
 let saveTimer;
+let saving = Promise.resolve();
 export function save(now = false) {
   clearTimeout(saveTimer);
   const write = () => {
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.warn('Save failed', e); }
+    if (mode === 'account') {
+      saving = saving.then(writeAccount);
+      return;
+    }
+    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { console.warn('Save failed', e); onSaveError(e); }
   };
-  if (now) write(); else saveTimer = setTimeout(write, 300);
+  if (now) write(); else saveTimer = setTimeout(write, mode === 'account' ? 800 : 300);
 }
 
 export const getState = () => state;

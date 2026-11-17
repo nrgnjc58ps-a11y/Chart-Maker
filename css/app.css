@@ -176,3 +176,4 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
   #print-root svg { display: block; break-after: page; page-break-after: always; }
   #print-root svg:last-child { break-after: auto; page-break-after: auto; }
 }
+.btn.danger-fill { background: var(--danger); border-color: var(--danger); color: #fff; }

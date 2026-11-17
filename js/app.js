@@ -43,6 +43,40 @@ function closeModal() {
 }
 $('#modal').addEventListener('click', (e) => { if (e.target.id === 'modal') closeModal(); });
 
+function askConfirm(message, okLabel = 'Delete') {
+  return new Promise((resolve) => {
+    const sheet = openModal(`<h3>${esc(message)}</h3><div class="actions"><button class="btn primary danger-fill" data-c="ok">${esc(okLabel)}</button><button class="btn" data-c="no">Cancel</button></div>`);
+    sheet.addEventListener('click', (e) => {
+      const c = e.target.dataset.c;
+      if (!c) return;
+      closeModal();
+      resolve(c === 'ok');
+    });
+  });
+}
+
+// Hand a file to the person: Artifact save prompt, iOS share sheet, or a download.
+async function saveFile(blob, filename, { preferShare = true } = {}) {
+  if (ARTIFACT) {
+    const dl = await window.claude.use('downloads');
+    if (!dl) { toast('Saving files isn’t available in this view.'); return false; }
+    try { await dl.save({ filename, data: blob }); return true; } catch (err) {
+      if (err && err.code !== 'declined') toast('Couldn’t save the file here.');
+      return false;
+    }
+  }
+  const file = new File([blob], filename, { type: blob.type });
+  if (preferShare && navigator.canShare && navigator.canShare({ files: [file] })) {
+    try { await navigator.share({ files: [file] }); return true; } catch (err) { if (err.name === 'AbortError') return false; }
+  }
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 60000);
+  return true;
+}
+
 function stepsLabel(n) {
   return n === 0 ? 'Original key' : `${n > 0 ? '+' : '−'}${Math.abs(n)} semitone${Math.abs(n) === 1 ? '' : 's'}`;
 }
@@ -56,16 +90,31 @@ function fileSafe(s) {
 }
 
 // ---------- routing ----------
+// Inside a claude.ai Artifact only plain #names reach the address bar, so the
+// app keeps its own current path there; elsewhere the path lives in location.hash.
+const ARTIFACT = store.inArtifact();
+let currentPath = ARTIFACT ? '/' : location.hash.replace(/^#/, '') || '/';
+function navigate(path) {
+  if (ARTIFACT) { currentPath = path; route(); }
+  else location.hash = '#' + path;
+}
+document.addEventListener('click', (e) => {
+  const a = e.target.closest('a[href^="#/"]');
+  if (!a) return;
+  e.preventDefault();
+  navigate(a.getAttribute('href').slice(1));
+});
 function route() {
   clearTimeout(previewTimer);
-  const parts = (location.hash.replace(/^#\/?/, '') || '').split('/');
+  if (!ARTIFACT) currentPath = location.hash.replace(/^#/, '') || '/';
+  const parts = (currentPath.replace(/^\/?/, '') || '').split('/');
   window.scrollTo(0, 0);
   if (parts[0] === 'song' && store.findSong(parts[1])) return viewSong(store.findSong(parts[1]));
   if (parts[0] === 'gig' && store.findGig(parts[1])) return viewGig(store.findGig(parts[1]));
   if (parts[0] === 'gigs') return viewGigs();
   return viewSongs();
 }
-window.addEventListener('hashchange', route);
+if (!ARTIFACT) window.addEventListener('hashchange', route);
 
 // ---------- home: songs ----------
 function homeTabs(active) {
@@ -90,7 +139,7 @@ function viewSongs(filter = '') {
       <li><a class="list-item" href="#/song/${s.id}">
         <div class="grow"><div class="title">${esc(s.title || 'Untitled')}</div><div class="meta">${esc(s.composer || '')}${s.tempo ? ` · ♩=${esc(s.tempo)}` : ''}</div></div>
         <span class="pill">${esc(transposeKeyName(s.key, s.transpose || 0))}</span>
-      </a></li>`).join('') : `<li class="empty">${state.songs.length ? 'No songs match.' : 'No songs yet. Tap “+ New song”.'}</li>`;
+      </a></li>`).join('') : (state.songs.length ? '<li class="empty">No songs match.</li>' : `<li class="empty">No songs yet. Tap “+ New song”, or start from an example chart.<br><button class="btn" data-act="add-example" style="margin-top:10px">Add example: Shape of a Heart</button></li>`);
   };
   draw(filter);
   $('#song-search').addEventListener('input', (e) => draw(e.target.value));
@@ -106,7 +155,9 @@ function settingsCard() {
           <select id="paper">${Object.entries(PAPER).map(([k, p]) => `<option value="${k}" ${state.prefs.paper === k ? 'selected' : ''}>${p.label}</option>`).join('')}</select>
         </label>
       </div>
-      <p class="small muted">Your songs are saved on this device only. Save a backup file now and then (to Files or iCloud Drive), especially before clearing Safari data.</p>
+      <p class="small muted">${store.storageMode() === 'account'
+        ? 'Your songs are saved privately to your Claude account, so they’re here whenever you open this page. A backup file is still a good idea.'
+        : 'Your songs are saved on this device only. Save a backup file now and then (to Files or iCloud Drive), especially before clearing Safari data.'}</p>
       <div class="row">
         <button class="btn" data-act="backup">Save backup file</button>
         <label class="btn">Restore backup<input type="file" id="restore" accept=".json,application/json" hidden></label>
@@ -142,7 +193,7 @@ function viewSong(song) {
       <div class="mobile-switch"><div class="tabs"><button data-view="edit">Edit</button><button data-view="preview">Preview</button></div></div>
       <section class="pane-edit" id="pane-edit"></section>
       <section class="pane-preview">
-        <div class="preview-bar"><span id="preview-info" class="muted small grow"></span><button class="btn small" data-act="song-print">Print</button></div>
+        <div class="preview-bar"><span id="preview-info" class="muted small grow"></span>${ARTIFACT ? '' : '<button class="btn small" data-act="song-print">Print</button>'}</div>
         <div class="pages" id="pages"></div>
       </section>
     </div>`;
@@ -329,11 +380,11 @@ const growAll = () => $$('textarea.bars').forEach(autoGrow);
 app.addEventListener('change', onSongField);
 
 function currentSong() {
-  const m = /^#\/song\/(.+)$/.exec(location.hash);
+  const m = /^\/song\/(.+)$/.exec(currentPath);
   return m ? store.findSong(m[1]) : null;
 }
 function currentGig() {
-  const m = /^#\/gig\/(.+)$/.exec(location.hash);
+  const m = /^\/gig\/(.+)$/.exec(currentPath);
   return m ? store.findGig(m[1]) : null;
 }
 
@@ -364,7 +415,7 @@ function viewGig(gig) {
   topbar({
     title: gig.name || 'Gig',
     left: '<a class="tbtn" href="#/gigs">‹ Gigs</a>',
-    right: '<button class="tbtn" data-act="gig-print">Print</button><button class="tbtn primary" data-act="gig-pdf">PDF</button>',
+    right: `${ARTIFACT ? '' : '<button class="tbtn" data-act="gig-print">Print</button>'}<button class="tbtn primary" data-act="gig-pdf">PDF</button>`,
   });
   app.innerHTML = `
     <div style="max-width:760px;margin:0 auto">
@@ -466,28 +517,31 @@ async function makePdf(getPages, name) {
     if (!pages.length) throw new Error('Nothing to print yet.');
     const blob = await pagesToPdf(pages, state.prefs.paper, (i, n) => { const p = $('#pdf-progress', sheet); if (p) p.textContent = `Page ${i} of ${n}`; });
     const filename = fileSafe(name) + '.pdf';
-    const file = new File([blob], filename, { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const canShare = navigator.canShare && navigator.canShare({ files: [file] });
+    const pdf = new Blob([blob], { type: 'application/pdf' });
+    const file = new File([pdf], filename, { type: 'application/pdf' });
+    const canShare = !ARTIFACT && navigator.canShare && navigator.canShare({ files: [file] });
+    const url = ARTIFACT ? '' : URL.createObjectURL(pdf);
     sheet.innerHTML = `
       <h3>PDF ready</h3>
-      <p class="muted small">${esc(filename)} · ${pages.length} page${pages.length === 1 ? '' : 's'} · ${(blob.size / 1024 / 1024).toFixed(1)} MB</p>
+      <p class="muted small">${esc(filename)} · ${pages.length} page${pages.length === 1 ? '' : 's'} · ${(pdf.size / 1024 / 1024).toFixed(1)} MB</p>
       <div class="actions">
+        ${ARTIFACT ? '<button class="btn primary" data-m="save">Save PDF</button>' : ''}
         ${canShare ? '<button class="btn primary" data-m="share">Share / Save to Files / Print</button>' : ''}
-        <a class="btn ${canShare ? '' : 'primary'}" href="${url}" download="${esc(filename)}">Download PDF</a>
-        <a class="btn" href="${url}" target="_blank" rel="noopener">Open PDF</a>
+        ${ARTIFACT ? '' : `<a class="btn ${canShare ? '' : 'primary'}" href="${url}" download="${esc(filename)}">Download PDF</a>
+        <a class="btn" href="${url}" target="_blank" rel="noopener">Open PDF</a>`}
         <button class="btn" data-m="close">Done</button>
       </div>`;
     sheet.addEventListener('click', async (e) => {
       const m = e.target.dataset.m;
-      if (m === 'close') { closeModal(); setTimeout(() => URL.revokeObjectURL(url), 60000); }
+      if (m === 'close') { closeModal(); if (url) setTimeout(() => URL.revokeObjectURL(url), 60000); }
+      if (m === 'save') saveFile(pdf, filename);
       if (m === 'share') {
-        try { await navigator.share({ files: [file], title: name }); } catch (err) { if (err.name !== 'AbortError') toast('Sharing didn’t work — try Download.'); }
+        try { await navigator.share({ files: [file], title: name }); } catch (err) { if (err.name !== 'AbortError') toast('Sharing didn’t work. Try Download.'); }
       }
     });
   } catch (err) {
     console.error(err);
-    sheet.innerHTML = `<h3>Couldn’t make the PDF</h3><p>${esc(err.message)}</p><p class="small muted">You can still use Print → Save to Files.</p><div class="actions"><button class="btn" data-m="close">Close</button></div>`;
+    sheet.innerHTML = `<h3>Couldn’t make the PDF</h3><p>${esc(err.message)}</p><div class="actions"><button class="btn" data-m="close">Close</button></div>`;
     sheet.addEventListener('click', (e) => { if (e.target.dataset.m === 'close') closeModal(); });
   }
 }
@@ -523,28 +577,26 @@ document.addEventListener('click', (e) => {
       state.songs.push(s);
       store.save(true);
       sessionStorageSet('view', 'edit');
-      location.hash = `#/song/${s.id}`;
+      navigate(`/song/${s.id}`);
+      break;
+    }
+    case 'add-example': {
+      state.songs.push(store.exampleSong());
+      store.save(true);
+      route();
       break;
     }
     case 'new-gig': {
       const g = { id: store.uid(), name: '', date: new Date().toISOString().slice(0, 10), venue: '', notes: '', setlistPage: true, items: [] };
       state.gigs.push(g);
       store.save(true);
-      location.hash = `#/gig/${g.id}`;
+      navigate(`/gig/${g.id}`);
       break;
     }
     case 'backup': {
       const blob = new Blob([store.exportBackup()], { type: 'application/json' });
       const name = `chart-maker-backup-${new Date().toISOString().slice(0, 10)}.json`;
-      const file = new File([blob], name, { type: 'application/json' });
-      if (navigator.canShare && navigator.canShare({ files: [file] })) {
-        navigator.share({ files: [file] }).catch(() => {});
-      } else {
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = name;
-        a.click();
-      }
+      saveFile(blob, name);
       break;
     }
     // song
@@ -579,9 +631,11 @@ document.addEventListener('click', (e) => {
       store.save(); drawEditPane(song); renderPreview(song);
       break;
     case 'sec-del':
-      if (!confirm(`Delete section ${i + 1}${song.sections[i].label ? ` (${song.sections[i].label})` : ''}?`)) break;
-      song.sections.splice(i, 1);
-      store.save(); drawEditPane(song); renderPreview(song);
+      askConfirm(`Delete section ${i + 1}${song.sections[i].label ? ` (${song.sections[i].label})` : ''}?`).then((ok) => {
+        if (!ok) return;
+        song.sections.splice(i, 1);
+        store.save(); drawEditPane(song); renderPreview(song);
+      });
       break;
     case 'raw-toggle':
       song.useRaw = btn.checked;
@@ -598,7 +652,7 @@ document.addEventListener('click', (e) => {
       const sheet = openModal(`
         <h3>${esc(song.title || 'Song')}</h3>
         <div class="actions">
-          <button class="btn" data-m="print">Print</button>
+          ${ARTIFACT ? '' : '<button class="btn" data-m="print">Print</button>'}
           <button class="btn" data-m="dup">Duplicate song</button>
           <button class="btn" data-m="share">Send song file (to another device)</button>
           <button class="btn danger" data-m="del">Delete song</button>
@@ -616,21 +670,21 @@ document.addEventListener('click', (e) => {
           copy.sections.forEach((s) => (s.id = store.uid()));
           state.songs.push(copy);
           store.save(true);
-          location.hash = `#/song/${copy.id}`;
+          navigate(`/song/${copy.id}`);
           toast('Duplicated');
         }
         if (m === 'share') {
           const name = fileSafe(song.title) + '.chart.json';
           const blob = new Blob([JSON.stringify({ app: 'chart-maker', song }, null, 1)], { type: 'application/json' });
-          const file = new File([blob], name, { type: 'application/json' });
-          if (navigator.canShare && navigator.canShare({ files: [file] })) navigator.share({ files: [file] }).catch(() => {});
-          else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name; a.click(); }
+          saveFile(blob, name);
         }
-        if (m === 'del' && confirm(`Delete “${song.title || 'this song'}”? This can’t be undone.`)) {
-          state.songs = state.songs.filter((s) => s.id !== song.id);
-          store.getState().songs = state.songs;
-          store.save(true);
-          location.hash = '#/';
+        if (m === 'del') {
+          askConfirm(`Delete “${song.title || 'this song'}”? This can’t be undone.`).then((ok) => {
+            if (!ok) return;
+            state.songs = state.songs.filter((s) => s.id !== song.id);
+            store.save(true);
+            navigate('/');
+          });
         }
       });
       break;
@@ -668,11 +722,12 @@ document.addEventListener('click', (e) => {
       printPages(gigPages(gig));
       break;
     case 'gig-del':
-      if (!confirm(`Delete the gig “${gig.name || 'Untitled'}”? Songs stay in your library.`)) break;
-      state.gigs = state.gigs.filter((g) => g.id !== gig.id);
-      store.getState().gigs = state.gigs;
-      store.save(true);
-      location.hash = '#/gigs';
+      askConfirm(`Delete the gig “${gig.name || 'Untitled'}”? Songs stay in your library.`).then((ok) => {
+        if (!ok) return;
+        state.gigs = state.gigs.filter((g) => g.id !== gig.id);
+        store.save(true);
+        navigate('/gigs');
+      });
       break;
   }
 });
@@ -682,10 +737,12 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
 
 // ---------- start ----------
 (async function start() {
-  state = store.load();
+  app.innerHTML = '<div class="spinner" style="margin-top:40px"></div><p class="empty">Opening your charts…</p>';
+  store.setSaveErrorHandler(() => toast('Couldn’t save that change. Check your connection.'));
+  state = await store.load();
   await loadFonts();
   route();
-  if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+  if (!ARTIFACT && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
     navigator.serviceWorker.register('sw.js').catch(() => {});
   }
 })();
