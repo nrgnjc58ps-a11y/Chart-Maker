@@ -242,3 +242,9 @@ details.help summary { cursor: pointer; font-weight: 600; min-height: 32px; }
 
 /* Chart pages never follow the dark theme */
 .page-wrap, .page-wrap svg, #print-root, #print-root svg { color: #000 !important; }
+
+/* Repeats of an existing section */
+.linked-card { border-left-color: var(--muted); border-left-style: dashed; }
+.linked-title { font-weight: 700; font-size: 17px; }
+.linked-bars { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 14px; color: var(--muted); background: var(--input); border-radius: 8px; padding: 8px 10px; margin: 4px 0 6px; white-space: pre-wrap; word-break: break-word; }
+.chip-repeat { background: var(--accent-soft); font-weight: 600; }

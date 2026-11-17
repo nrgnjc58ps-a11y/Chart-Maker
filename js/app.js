@@ -1,5 +1,5 @@
 import * as store from './store.js';
-import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
+import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, resolveSection, splitBarsEx, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
 import { renderSong, pagesToPdf, loadFonts, setChordSize, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
@@ -303,10 +303,11 @@ function drawEditPane(song) {
       </div>
     </div>
 
-    ${song.useRaw ? '' : song.sections.map((s, i) => sectionCard(s, i, song.sections.length)).join('')}
+    ${song.useRaw ? '' : song.sections.map((s, i) => (s.linkTo ? linkedCard(song, s, i) : sectionCard(s, i, song.sections.length))).join('')}
 
     ${song.useRaw ? '' : `<div class="card">
-      <h2>Add a section</h2>
+      <div id="repeat-chips">${repeatChips(song)}</div>
+      <h2>Add a new section</h2>
       <div class="chips">${['Intro', 'Verse', 'Pre-Chorus', 'Chorus', 'Bridge', 'Solo', 'Outro'].map((n) => `<button class="chip" data-act="add-sec" data-name="${n}">+ ${n}</button>`).join('')}<button class="chip" data-act="add-sec" data-name="">+ Other</button></div>
     </div>`}
 
@@ -324,6 +325,45 @@ function drawEditPane(song) {
     <div class="row" style="margin:4px 0 20px"><span class="grow"></span><button class="btn danger" data-act="song-del">Delete this song</button></div>
     <datalist id="section-names">${SECTION_NAMES.map((n) => `<option value="${n}">`).join('')}</datalist>`;
   requestAnimationFrame(growAll);
+}
+
+// One button per section already written (Verse, Chorus…), to play it again.
+function repeatChips(song) {
+  const seen = new Set();
+  const originals = song.sections.filter((s) => !s.linkTo && splitBarsEx(s.bars).length).filter((s) => {
+    const key = (s.label || '').trim().toLowerCase() || s.id;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  if (!originals.length) return '';
+  return `<h2>Repeat a section</h2>
+    <div class="chips" style="margin-bottom:14px">${originals.map((s) => `<button class="chip chip-repeat" data-act="add-link" data-id="${s.id}">↻ ${esc(s.label || 'Section ' + (song.sections.indexOf(s) + 1))}</button>`).join('')}</div>`;
+}
+
+// A repeat of another section: shows what it plays, edits happen on the original.
+function linkedCard(song, s, i) {
+  const src = song.sections.find((x) => x.id === s.linkTo && !x.linkTo);
+  const r = resolveSection(song, s);
+  const n = src ? song.sections.indexOf(src) + 1 : '?';
+  const bars = splitBarsEx(r.bars).length + (r.repeat ? splitBarsEx(r.ending1).length + splitBarsEx(r.ending2).length : 0);
+  return `
+  <div class="card section-card linked-card" data-index="${i}">
+    <div class="section-head">
+      <span class="section-num">${i + 1}</span>
+      <div class="grow"><div class="linked-title">↻ ${esc(r.label || 'Section ' + n)}</div>
+      <div class="small muted">${src ? `Same as section ${n} · ${bars} bar${bars === 1 ? '' : 's'}${r.repeat ? ' · repeated' : ''}. Changes to section ${n} show here too.` : 'The original section was deleted.'}</div></div>
+    </div>
+    <div class="linked-bars">${esc(r.bars)}</div>
+    <div class="row"><label class="check"><input type="checkbox" data-sec="${i}" data-f="pageBreak" ${s.pageBreak ? 'checked' : ''}> Start on a new page</label></div>
+    <div class="section-tools">
+      <button class="btn small icon" data-act="sec-up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
+      <button class="btn small icon" data-act="sec-down" data-i="${i}" ${i === song.sections.length - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
+      <button class="btn small" data-act="sec-unlink" data-i="${i}">Change this one</button>
+      <span class="grow"></span>
+      <button class="btn small danger" data-act="sec-del" data-i="${i}">Delete</button>
+    </div>
+  </div>`;
 }
 
 function sectionCard(s, i, count) {
@@ -437,6 +477,18 @@ const onSongField = (e) => {
     if (tgt.type === 'checkbox') sec[tgt.dataset.f] = tgt.checked;
     else sec[tgt.dataset.f] = tgt.value;
     if (tgt.dataset.f === 'repeat') drawEditPane(song);
+    if (tgt.dataset.f === 'bars' || tgt.dataset.f === 'label') {
+      // Keep the "Repeat a section" buttons and any repeat cards up to date while typing.
+      const rc = $('#repeat-chips');
+      if (rc) rc.innerHTML = repeatChips(song);
+      $$('.linked-card').forEach((card) => {
+        const j = +card.dataset.index;
+        const holder = document.createElement('div');
+        holder.innerHTML = linkedCard(song, song.sections[j], j);
+        card.parentNode.insertBefore(holder.firstElementChild, card);
+        card.parentNode.removeChild(card);
+      });
+    }
   } else return;
   song.updated = Date.now();
   store.save();
@@ -568,9 +620,35 @@ document.addEventListener('click', (e) => {
       song.sections.splice(i + 1, 0, { ...song.sections[i], id: store.uid() });
       store.save(); drawEditPane(song); renderPreview(song);
       break;
+    case 'add-link': {
+      const src = song.sections.find((x) => x.id === btn.dataset.id);
+      if (!src) break;
+      song.sections.push({ id: store.uid(), linkTo: src.id, pageBreak: false });
+      store.save(); drawEditPane(song); renderPreview(song);
+      $$('.section-card').pop()?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      toast(`Added ${src.label || 'section'} again`);
+      break;
+    }
+    case 'sec-unlink': {
+      // Turn the repeat into its own section, starting from the original's chords.
+      const r = resolveSection(song, song.sections[i]);
+      song.sections[i] = { ...r, id: store.uid(), linkTo: undefined, _idx: undefined };
+      delete song.sections[i].linkTo;
+      delete song.sections[i]._idx;
+      store.save(); drawEditPane(song); renderPreview(song);
+      const card = $$('.section-card')[i];
+      card?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      $('textarea', card)?.focus({ preventScroll: true });
+      break;
+    }
     case 'sec-del':
-      askConfirm(`Delete section ${i + 1}${song.sections[i].label ? ` (${song.sections[i].label})` : ''}?`).then((ok) => {
+      askConfirm(`Delete section ${i + 1}${resolveSection(song, song.sections[i]).label ? ` (${resolveSection(song, song.sections[i]).label})` : ''}?${!song.sections[i].linkTo && song.sections.some((x) => x.linkTo === song.sections[i].id) ? ' Its repeats will keep their chords.' : ''}`).then((ok) => {
         if (!ok) return;
+        const gone = song.sections[i];
+        // Repeats of a deleted section keep their music as their own sections.
+        song.sections.forEach((x, j) => {
+          if (x.linkTo === gone.id) song.sections[j] = { ...gone, id: store.uid(), pageBreak: !!x.pageBreak };
+        });
         song.sections.splice(i, 1);
         store.save(); drawEditPane(song); renderPreview(song);
       });

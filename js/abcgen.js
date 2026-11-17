@@ -435,6 +435,14 @@ function header(song, steps) {
 }
 
 // Returns { abc, lineSections: [sectionIndex per music line], warnings }
+// A repeat of another section ("Chorus again") plays the original's music;
+// only its own "start on a new page" setting is kept.
+export function resolveSection(song, sec) {
+  if (!sec.linkTo) return sec;
+  const src = (song.sections || []).find((x) => x.id === sec.linkTo && !x.linkTo);
+  return src ? { ...src, id: sec.id, linkTo: sec.linkTo, pageBreak: !!sec.pageBreak } : sec;
+}
+
 // pads[i]: extra spacing after the i-th chord label (the renderer works these out).
 export function songToAbc(song, steps = 0, pads = []) {
   const meter = meterInfo(song.time);
@@ -444,7 +452,8 @@ export function songToAbc(song, steps = 0, pads = []) {
   out.push(`K:${key}`, 'V:1 stem=up');
   const lineSections = [];
   const warnings = [];
-  const sections = (song.sections || []).filter((s) => splitBarsEx(s.bars).length || splitBarsEx(s.ending1).length || s.label);
+  const sections = (song.sections || []).map((s, idx) => ({ ...resolveSection(song, s), _idx: idx }))
+    .filter((s) => splitBarsEx(s.bars).length || splitBarsEx(s.ending1).length || s.label);
 
   sections.forEach((sec, si) => {
     const isLast = si === sections.length - 1;
@@ -518,7 +527,7 @@ export function songToAbc(song, steps = 0, pads = []) {
       out.push(`%%setbarnb ${tr.bar}`);
       tr.bar += chunk.length;
       out.push(line.trim());
-      lineSections.push(song.sections.indexOf(sec));
+      lineSections.push(sec._idx);
     });
   });
 
