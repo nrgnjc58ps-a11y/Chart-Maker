@@ -430,7 +430,7 @@ function header(song, steps) {
 // pads[i]: extra spacing after the i-th chord label (the renderer works these out).
 export function songToAbc(song, steps = 0, pads = []) {
   const meter = meterInfo(song.time);
-  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, pads, style: song.chordStyle || 'standard' };
+  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, pads, style: song.chordStyle || 'short' };
   const out = header(song, steps);
   const key = KEYS.includes(song.key) ? song.key : 'C';
   out.push(`K:${key}`, 'V:1 stem=up');

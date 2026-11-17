@@ -1,4 +1,4 @@
-import { prettyChord, styleChord } from './abcgen.js';
+import { prettyChord, styleChord, canonicalChord } from './abcgen.js';
 
 // Quick-entry chord pad shown while a chord box (bars / endings) is focused.
 // Buttons never take focus away from the box, so the caret stays put.
@@ -92,7 +92,7 @@ function insertChord(field, name) {
   if (/\/$/.test(before)) {
     // After "/": use just the root as the bass note.
     put(field, before + name.match(/^[A-G][#b]?/)[0], after);
-  } else insertToken(field, name);
+  } else insertToken(field, styleChord(name, getStyle()));
 }
 function insertBar(field, kind = '|') {
   const { before, after } = ctx(field);
@@ -107,7 +107,11 @@ function addModifier(field, mod) {
   const { before, after } = ctx(field);
   const m = /([A-G][#b]?)([^\s|/]*)$/.exec(before);
   if (!m) return false;
-  let quality = m[2];
+  const typed = m[0];
+  const canon = canonicalChord(typed);
+  const write = (root, q) => put(field, before.slice(0, before.length - typed.length) + styleChord(root + q, getStyle()), after);
+  let quality = canon.slice(m[1].length);
+  const original = quality;
   const isMinor = quality.startsWith('m') && !quality.startsWith('maj');
   if (ALTS.includes(mod)) {
     // Alterations add on (G7 → G7♭9 → G7♭9♯11); tap again to take one off.
@@ -118,14 +122,14 @@ function addModifier(field, mod) {
       if (!/(7|9|11|13)/.test(quality)) quality += '7';
       quality += mod;
     }
-    put(field, before.slice(0, before.length - m[0].length) + m[1] + quality, after);
+    write(m[1], quality);
     return true;
   }
   if (mod === 'm') quality = isMinor ? '' : 'm'; // toggle minor
   else if (['7', '9', '6', 'add9'].includes(mod)) quality = (isMinor ? 'm' : '') + mod; // keep minor: Am → Am7
-  else quality = mod; // sus4, maj7, m7, dim… replace
-  if (quality === m[2] && mod !== 'm') quality = isMinor ? 'm' : ''; // tap again to undo
-  put(field, before.slice(0, before.length - m[0].length) + m[1] + quality, after);
+  else quality = mod === 'maj7' && isMinor ? 'm(maj7)' : mod; // sus4, maj7, dim… replace (minor + maj7 = minor-major 7th)
+  if (quality === original && mod !== 'm') quality = isMinor ? 'm' : ''; // tap again to undo
+  write(m[1], quality);
   return true;
 }
 function addSlash(field) {
@@ -143,7 +147,7 @@ function backspace(field) {
 }
 
 // ---------------------------------------------------------------- UI
-let pad, field, getKey, getStyle, kbPref;
+let pad, field, getKey, getStyle, setStyle, kbPref;
 
 function kbHidden() {
   if (kbPref != null) return kbPref;
@@ -182,7 +186,7 @@ function draw() {
       ${btn(kbHidden() ? '⌨' : '⌨̶', 'kb', '', kbHidden() ? 'type' : 'hide')}
       ${btn('Done', 'done', '', '', 'pk-done')}
     </div>
-    <div class="pk-label">In ${pretty(key)}</div>
+    <div class="pk-label pk-labelrow"><span>In ${pretty(key)}</span>${btn(style === 'short' ? 'CΔ7 · C-7' : 'Cmaj7 · Cm7', 'style', style === 'short' ? 'standard' : 'short', '', 'pk-style')}</div>
     <div class="pk-row pk-key">${diatonic.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord')).join('')}</div>
     <div class="pk-row pk-key">${extra.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}</div>
     <div class="pk-row pk-alt">${ALTS.map((m) => btn(m === 'alt' ? 'alt' : pretty(m), 'mod', m)).join('')}</div>
@@ -200,6 +204,7 @@ function act(b) {
   else if (a === 'slash') addSlash(field);
   else if (a === 'back') backspace(field);
   else if (a === 'kb') { setKb(!kbHidden()); draw(); }
+  else if (a === 'style') { setStyle(v); draw(); }
   else if (a === 'done') field.blur();
   if (navigator.vibrate) try { navigator.vibrate(5); } catch { /* ignore */ }
 }
@@ -212,9 +217,10 @@ function place() {
   document.body.style.paddingBottom = pad.offsetHeight + offset + 12 + 'px';
 }
 
-export function initPalette(keyGetter, styleGetter = () => 'standard') {
+export function initPalette(keyGetter, styleGetter = () => 'short', styleSetter = () => {}) {
   getKey = keyGetter;
   getStyle = styleGetter;
+  setStyle = styleSetter;
   pad = document.createElement('div');
   pad.className = 'chordpad';
   pad.hidden = true;

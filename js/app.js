@@ -281,7 +281,7 @@ function drawEditPane(song) {
       ${song.tuning === 'custom' ? `<div class="row" style="margin-top:8px"><label class="field">Tuning (low to high)<input type="text" data-song="tuningCustom" value="${esc(song.tuningCustom)}" placeholder="e.g. C G D G B D" ${NO_AUTO}></label></div>` : ''}
       <label class="check" style="margin-top:6px"><input type="checkbox" data-song="showKey" ${song.showKey !== false ? 'checked' : ''}> Print the key at the top (e.g. “Key: G major”)</label>
       <div class="row" style="margin-top:8px">
-        <label class="field">Chord symbols<select data-song="chordStyle">${Object.entries(CHORD_STYLES).map(([k, v]) => `<option value="${k}" ${(song.chordStyle || 'standard') === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
+        <label class="field">Chord symbols<select data-song="chordStyle">${Object.entries(CHORD_STYLES).map(([k, v]) => `<option value="${k}" ${(song.chordStyle || 'short') === k ? 'selected' : ''}>${esc(v)}</option>`).join('')}</select></label>
       </div>
       <div class="row" style="margin-top:8px">
         <label class="field">Chart lettering<select data-song="style">${Object.entries(FONT_STYLES).map(([k, f]) => `<option value="${k}" ${song.style === k ? 'selected' : ''}>${f.label}</option>`).join('')}</select></label>
@@ -646,7 +646,15 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   app.innerHTML = '<div class="spinner" style="margin-top:40px"></div><p class="empty">Opening your charts…</p>';
   store.setSaveErrorHandler(() => toast('Couldn’t save that change. Check your connection.'));
   state = await store.load();
-  initPalette(() => currentSong()?.key || 'C', () => currentSong()?.chordStyle || 'standard');
+  initPalette(() => currentSong()?.key || 'C', () => currentSong()?.chordStyle || 'short', (style) => {
+    const song = currentSong();
+    if (!song) return;
+    song.chordStyle = style;
+    store.save();
+    const sel = $('[data-song="chordStyle"]');
+    if (sel) sel.value = style;
+    renderPreview(song, false);
+  });
   await loadFonts();
   route();
   if (!ARTIFACT && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
