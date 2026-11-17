@@ -1,8 +1,8 @@
 // Offline support: serve the app from the cache, refresh it in the background.
-const CACHE = 'chart-maker-v1';
+const CACHE = 'chart-maker-v2';
 const FILES = [
   './', 'index.html', 'css/app.css', 'manifest.webmanifest',
-  'js/app.js', 'js/abcgen.js', 'js/render.js', 'js/store.js',
+  'js/app.js', 'js/abcgen.js', 'js/render.js', 'js/store.js', 'js/palette.js',
   'vendor/abcjs-basic-min.js', 'vendor/jspdf.umd.min.js',
   'fonts/patrick-hand-sc.woff2', 'fonts/stardos-stencil-700.woff2', 'fonts/kalam-700.woff2',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',

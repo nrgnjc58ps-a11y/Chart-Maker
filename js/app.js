@@ -2,6 +2,7 @@ import * as store from './store.js';
 import { RHYTHMS, KEYS, FONT_STYLES, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
 import { renderSong, renderSetlist, pagesToPdf, loadFonts, PAPER } from './render.js';
+import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -275,7 +276,7 @@ function sectionCard(s, i, count) {
       <span class="section-num">${i + 1}</span>
       <input type="text" list="section-names" data-sec="${i}" data-f="label" value="${esc(s.label)}" placeholder="Section name (optional)" autocomplete="off">
     </div>
-    <textarea class="bars" rows="2" data-sec="${i}" data-f="bars" placeholder="E | | C#m | | A | B/A | A | B" ${NO_AUTO}>${esc(s.bars)}</textarea>
+    <textarea class="bars" rows="2" data-sec="${i}" data-f="bars" data-chordbox inputmode="${keyboardHidden() ? 'none' : 'text'}" placeholder="Tap chords and | below, or type: E | | C#m | A" ${NO_AUTO}>${esc(s.bars)}</textarea>
     <div class="section-opts">
       <label class="field">Rhythm${sel('rhythm', Object.entries(RHYTHMS).map(([k, v]) => `<option value="${k}" ${s.rhythm === k ? 'selected' : ''}>${v}</option>`).join(''))}</label>
       <label class="field" style="max-width:130px">Bars per line${sel('perLine', [2, 3, 4, 5, 6, 8].map((n) => `<option ${+s.perLine === n ? 'selected' : ''}>${n}</option>`).join(''))}</label>
@@ -287,8 +288,8 @@ function sectionCard(s, i, count) {
     ${s.repeat ? `
       <div class="endings">
         <label class="field" style="max-width:110px">Play × times<input type="number" inputmode="numeric" min="2" max="16" data-sec="${i}" data-f="times" value="${esc(s.times)}" placeholder="2"></label>
-        <label class="field">1st ending bars<input type="text" data-sec="${i}" data-f="ending1" value="${esc(s.ending1)}" placeholder="e.g. B/A" ${NO_AUTO}></label>
-        <label class="field">2nd ending bars<input type="text" data-sec="${i}" data-f="ending2" value="${esc(s.ending2)}" placeholder="e.g. B" ${NO_AUTO}></label>
+        <label class="field">1st ending bars<input type="text" data-sec="${i}" data-f="ending1" data-chordbox inputmode="${keyboardHidden() ? 'none' : 'text'}" value="${esc(s.ending1)}" placeholder="e.g. B/A" ${NO_AUTO}></label>
+        <label class="field">2nd ending bars<input type="text" data-sec="${i}" data-f="ending2" data-chordbox inputmode="${keyboardHidden() ? 'none' : 'text'}" value="${esc(s.ending2)}" placeholder="e.g. B" ${NO_AUTO}></label>
       </div>` : ''}
     <div class="row" style="margin-top:8px"><label class="field">Note under the first bar<input type="text" data-sec="${i}" data-f="note" value="${esc(s.note)}" placeholder="e.g. Cont. 8ths feel / and accents" autocomplete="off"></label></div>
     <div class="section-tools">
@@ -360,7 +361,7 @@ const onSongField = (e) => {
   if (tgt.dataset.song) {
     song[tgt.dataset.song] = tgt.value;
     if (tgt.dataset.song === 'title') $('#top-title').textContent = tgt.value || 'New song';
-    if (tgt.dataset.song === 'key') updateTransposeUi(song);
+    if (tgt.dataset.song === 'key') { updateTransposeUi(song); refreshPalette(); }
   } else if (tgt.dataset.sec != null) {
     const sec = song.sections[+tgt.dataset.sec];
     if (!sec) return;
@@ -740,6 +741,7 @@ document.addEventListener('visibilitychange', () => { if (document.visibilitySta
   app.innerHTML = '<div class="spinner" style="margin-top:40px"></div><p class="empty">Opening your charts…</p>';
   store.setSaveErrorHandler(() => toast('Couldn’t save that change. Check your connection.'));
   state = await store.load();
+  initPalette(() => currentSong()?.key || 'C');
   await loadFonts();
   route();
   if (!ARTIFACT && 'serviceWorker' in navigator && location.protocol.startsWith('http')) {
