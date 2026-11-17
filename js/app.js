@@ -413,6 +413,7 @@ function helpCard() {
       ${r('A . . B', '<b>.</b> holds a beat — here A for 3 beats, B on beat 4.')}
       ${r('N.C.', 'No chord.')}
       ${r('C ^F', '<b>^</b> pushes a chord an eighth early: here F lands on the “and” of 2. The bar is written in rhythm notation.')}
+      ${r('C | ^F', 'A push onto beat 1: F comes in on the “and” of 4 of the C bar and is tied over the barline.')}
       ${r('|: G | C :|', 'Repeat signs anywhere in a section. <code>:|:</code> ends one repeat and starts the next.')}
       ${r('G | % | % | %', '<b>%</b> is a one-bar repeat sign (play the previous bar again).')}
       ${r('E >>', 'Accent the first 2 slashes of the bar (<code>></code>, <code>>>></code>…).')}

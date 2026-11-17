@@ -253,7 +253,9 @@ export function prettyChord(chord) {
 const textNote = (pos, t) => `"${pos}${TEXT_MARK}${abcText(t)}"`;
 
 
-function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
+// opts.pushOut: a chord pushed into the NEXT bar's beat 1 lands on this bar's last eighth.
+// opts.tiedIn: this bar's beat-1 chord was already sounded (and named) in the bar before.
+function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr, opts = {}) {
   const chordText = (c) => {
     tr.ord++;
     return `"^${c.replace(/(^|\s)\^/g, '$1').split(/\s+/).map((x) => prettyChord(styleChord(transposeChord(x, tr.steps, tr.key), tr.style))).join('  ')}"`;
@@ -286,7 +288,10 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
     });
   }
 
-  if (bar.pushes && meter.sub === 2 && meter.beatLen === 4) return pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc);
+  // Rhythm notation only when something really lands off the beat (a beat-1 push with no bar
+  // before it just plays on 1, so that bar stays as slashes).
+  const realPush = chords.some((c, b) => c && c.startsWith('^') && (b > 0 || opts.tiedIn));
+  if ((realPush || opts.pushOut) && meter.sub === 2 && meter.beatLen === 4) return pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc, opts);
 
   const rhythm = bar.rhythm || defaultRhythm || 'slashes';
   const notes = []; // {chord, len, beam}
@@ -343,15 +348,25 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
 // A bar with pushed chords ("C ^F": F on the 'and' of 2) in rhythm notation:
 // each chord's slash starts where the chord lands and is held (tied) to the next chord.
 // Units are sixteenths; an eighth push = 2.
-function pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc) {
+function pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc, opts = {}) {
   const onsets = [];
   chords.forEach((c, b) => {
     if (!c) return;
     const pushed = c.startsWith('^');
-    let pos = b * meter.beatLen - (pushed ? 2 : 0);
-    if (pos < 0) pos = 0; // a push on beat 1 belongs to the previous bar; keep it on 1
-    onsets.push({ pos, chord: pushed ? c.slice(1) : c });
+    const name = pushed ? c.slice(1) : c;
+    if (b === 0) {
+      // A push onto beat 1 sounds in the bar before (tied over); here it just carries on.
+      onsets.push({ pos: 0, chord: pushed && opts.tiedIn ? null : name });
+      return;
+    }
+    onsets.push({ pos: b * meter.beatLen - (pushed ? 2 : 0), chord: name });
   });
+  const lastEighth = meter.barLen - 2;
+  if (opts.pushOut) {
+    const clash = onsets.findIndex((o) => o.pos === lastEighth);
+    if (clash >= 0) onsets.splice(clash, 1);
+    onsets.push({ pos: lastEighth, chord: opts.pushOut });
+  }
   onsets.sort((a, b) => a.pos - b.pos);
   if (!onsets.length || onsets[0].pos > 0) onsets.unshift({ pos: 0, chord: null });
   const end = meter.barLen;
@@ -381,7 +396,8 @@ function pushedBarToAbc(bar, chords, meter, chordText, startBits, endBits, cresc
     if (i === 0) pre += startBits + cresc[0];
     if (i < bar.accents) pre += '!>!';
     if (i === notes.length - 1) pre += endBits;
-    const post = (n.tie ? '-' : '') + (i === notes.length - 1 && cresc[1] ? cresc[1] : '');
+    const tieOver = i === notes.length - 1 && opts.pushOut; // held over the barline into the next bar
+    const post = (n.tie || tieOver ? '-' : '') + (i === notes.length - 1 && cresc[1] ? cresc[1] : '');
     return `${pre}${n.label}${RHY}B${n.len}${post}`;
   }).join(' ');
 }
@@ -541,6 +557,18 @@ export function songToAbc(song, steps = 0, pads = []) {
         if (timesText) items[items.length - 1].extraEnd = textNote('^', timesText);
       }
     }
+    // Pushes onto beat 1 ("| ^F"): the chord comes in on the last eighth of the bar before.
+    const simpleTime = meter.sub === 2 && meter.beatLen === 4;
+    items.forEach((it, k) => {
+      const next = items[k + 1];
+      if (!simpleTime || !next || next.before || it.bar.custom != null || it.bar.simile || next.bar.custom != null || next.bar.simile) return;
+      const first = placeChords(next.bar.beats, meter.beats)[0];
+      if (first && first.startsWith('^')) {
+        it.pushOut = first.slice(1);
+        next.tiedIn = true;
+      }
+    });
+
     // Inline repeat ends (":|" typed in the bars).
     items.forEach((it) => { if (it.bar.endRepeat && it.after === '|') it.after = ':|'; });
     const lastItem = items[items.length - 1];
@@ -572,7 +600,7 @@ export function songToAbc(song, steps = 0, pads = []) {
       let line = (ci === 0 && repeat) || chunk[0].lineStart ? '|:' : '';
       chunk.forEach((it) => {
         if (it.before) line += `${it.before} `;
-        line += barToAbc(it.bar, meter, sec.rhythm, it.extraStart || '', it.extraEnd || '', tr) + ` ${it.after} `;
+        line += barToAbc(it.bar, meter, sec.rhythm, it.extraStart || '', it.extraEnd || '', tr, { pushOut: it.pushOut, tiedIn: it.tiedIn }) + ` ${it.after} `;
       });
       // Short line: pad with invisible bars so every bar on the chart is the same width.
       for (let k = chunk.length; k < per; k++) {
