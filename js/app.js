@@ -3,7 +3,7 @@ import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, resolve
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
 import { renderSong, pagesToPdf, loadFonts, setChordSize, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
-import { photoImportAvailable, readChartImages, errorText, imageTypes, maxImages } from './photo.js';
+import { photoImportAvailable, readChartImages, prepareFiles, errorText, imageTypes, maxImages } from './photo.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -199,9 +199,9 @@ function newSongSheet() {
     <h3>New chart</h3>
     <div class="actions">
       <button class="btn primary" data-act="new-blank">Blank chart</button>
-      <label class="btn">From a photo or screenshot…<input type="file" id="photo-pick" accept="${esc(imageTypes())}" ${many ? 'multiple' : ''} hidden></label>
+      <label class="btn">From a photo, screenshot or PDF…<input type="file" id="photo-pick" accept="${esc(imageTypes())}" ${many ? 'multiple' : ''} hidden></label>
     </div>
-    <p class="small muted">Pick a picture of a chart${many ? ` (up to ${maxImages()} pages of one song)` : ''}. Claude reads it and writes it out here for you to check and edit.</p>`);
+    <p class="small muted">Pick a picture or PDF of a chart${many ? ` (up to ${maxImages()} pages of one song)` : ''}. Claude reads it and writes it out here for you to check and edit.</p>`);
   $('#photo-pick').addEventListener('change', (e) => {
     const files = [...e.target.files];
     if (files.length) importFromPhotos(files);
@@ -210,7 +210,20 @@ function newSongSheet() {
 
 async function importFromPhotos(files) {
   const ctl = new AbortController();
-  const urls = files.map((f) => URL.createObjectURL(f));
+  let prep;
+  if (files.some((f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || ''))) {
+    openModal('<h3>Opening the PDF…</h3><div class="spinner"></div>');
+  }
+  try {
+    prep = await prepareFiles(files);
+  } catch (err) {
+    const m = openModal(`<h3>Couldn’t open that file</h3><p>${esc(err && err.message)}</p><div class="actions"><button class="btn" data-m="close">OK</button></div>`);
+    m.addEventListener('click', (e) => { if (e.target.dataset.m === 'close') closeModal(); });
+    return;
+  }
+  if (!prep.images.length) { closeModal(); toast('Nothing to read in that file.'); return; }
+  if (prep.skipped) toast(`Only the first ${prep.images.length} pages are read.`, 3500);
+  const urls = prep.images.map((f) => URL.createObjectURL(f));
   const sheet = openModal(`
     <h3>Reading the chart…</h3>
     <div class="photo-thumbs">${urls.map((u) => `<img src="${u}" alt="">`).join('')}</div>
@@ -220,7 +233,7 @@ async function importFromPhotos(files) {
   const done = () => urls.forEach((u) => URL.revokeObjectURL(u));
   let result;
   try {
-    result = await readChartImages(files, ctl.signal);
+    result = await readChartImages(prep.images, ctl.signal, prep.text);
   } catch (err) {
     done();
     if (err && err.code === 'cancelled') { closeModal(); return; }

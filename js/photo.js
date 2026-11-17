@@ -23,7 +23,83 @@ export function photoImportAvailable() {
   return samplePromise.then(Boolean);
 }
 
-export const imageTypes = () => (limits?.images?.mediaTypes || ['image/jpeg', 'image/png', 'image/webp']).join(',');
+export const imageTypes = () => [...(limits?.images?.mediaTypes || ['image/jpeg', 'image/png', 'image/webp']), 'application/pdf', '.pdf'].join(',');
+
+// ---------- PDFs: each page becomes a picture (pdf.js, loaded only when needed) ----------
+const isPdf = (f) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '');
+let pdfjsPromise = null;
+function loadPdfJs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((resolve, reject) => {
+      if (window.pdfjsLib) return resolve(window.pdfjsLib);
+      const s = document.createElement('script');
+      s.src = 'vendor/pdf.min.js';
+      s.onload = () => {
+        const lib = window.pdfjsLib;
+        if (!lib) return reject(new Error('The PDF reader didn’t load.'));
+        lib.GlobalWorkerOptions.workerSrc = 'vendor/pdf.worker.min.js';
+        resolve(lib);
+      };
+      s.onerror = () => { pdfjsPromise = null; reject(new Error('The PDF reader didn’t load.')); };
+      document.head.appendChild(s);
+    });
+  }
+  return pdfjsPromise;
+}
+
+async function pdfToImages(file, maxPages) {
+  const lib = await loadPdfJs();
+  let doc;
+  try {
+    doc = await lib.getDocument({ data: new Uint8Array(await file.arrayBuffer()), isEvalSupported: false }).promise;
+  } catch (e) {
+    throw new Error(e && e.name === 'PasswordException' ? 'That PDF is password protected.' : 'That PDF couldn’t be opened.');
+  }
+  const images = [];
+  let text = '';
+  const pages = Math.min(doc.numPages, maxPages);
+  for (let n = 1; n <= pages; n++) {
+    const page = await doc.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, 1800 / Math.max(base.width, base.height));
+    const vp = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(vp.width);
+    canvas.height = Math.round(vp.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport: vp }).promise;
+    images.push(await new Promise((r) => canvas.toBlob(r, 'image/png')));
+    try {
+      const tc = await page.getTextContent();
+      text += tc.items.map((i) => i.str).join(' ') + '\n';
+    } catch { /* scanned PDFs have no text */ }
+  }
+  doc.destroy();
+  return { images: images.filter(Boolean), text, skipped: doc.numPages - pages };
+}
+
+// Photos pass straight through; PDFs are turned into page pictures.
+// Returns {images, text (any text found in PDFs), skipped (pages left out)}.
+export async function prepareFiles(files) {
+  const max = maxImages();
+  const images = [];
+  let text = '', skipped = 0;
+  for (const f of files) {
+    const room = max - images.length;
+    if (room <= 0) { skipped++; continue; }
+    if (isPdf(f)) {
+      const r = await pdfToImages(f, room);
+      images.push(...r.images);
+      text += r.text;
+      skipped += r.skipped;
+    } else {
+      images.push(f);
+    }
+  }
+  return { images, text: text.replace(/[ \t]+/g, ' ').trim(), skipped };
+}
 export const maxImages = () => limits?.images?.maxCount || 1;
 
 const PROMPT = `You are reading a photo or screenshot of a guitarist's chord chart (a gig chart: slash notation, chord symbols, repeat signs, endings, road-map signs).
@@ -100,10 +176,11 @@ export function songFromReading(data) {
 }
 
 // Ask Claude to read the picture(s). Rejects with {code, message}.
-export async function readChartImages(files, signal) {
+export async function readChartImages(images, signal, pdfText = '') {
   const sample = await samplePromise;
   if (!sample) throw { code: 'images_unavailable', message: 'Not available here.' };
-  const data = await sample.json(PROMPT, { images: [...files].slice(0, maxImages()), modelTier: 'complex', signal });
+  const hint = pdfText ? `\n\nThe pages came from a PDF. Its text layer reads as below. It can help with exact chord spellings and titles, but its order and positions are unreliable, so follow the pictures for the layout:\n${pdfText.slice(0, 6000)}` : '';
+  const data = await sample.json(PROMPT + hint, { images: images.slice(0, maxImages()), modelTier: 'complex', signal });
   return songFromReading(data);
 }
 
