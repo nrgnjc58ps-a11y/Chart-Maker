@@ -485,11 +485,12 @@ export function songToAbc(song, steps = 0, pads = []) {
     // Note under the first bar.
     if (sec.note) items[0].extraStart = textNote('_', sec.note);
 
-    // Line breaks: chunk by bars-per-line. A lone 2nd-ending bar stays with the line before it.
+    // Line breaks: chunk by bars-per-line, so every line keeps the 4-bar grid. A lone
+    // 2nd ending starts the next line, unless the section asks to keep endings together.
     const per = Math.max(1, parseInt(sec.perLine, 10) || 4);
     const chunks = [];
     for (let i = 0; i < items.length; i += per) chunks.push(items.slice(i, i + per));
-    if (chunks.length > 1 && chunks[chunks.length - 1].length === 1 && chunks[chunks.length - 1][0].before === '[2') {
+    if (sec.keepEndings && chunks.length > 1 && chunks[chunks.length - 1].length === 1 && chunks[chunks.length - 1][0].before === '[2') {
       chunks[chunks.length - 2].push(...chunks.pop());
     }
 

@@ -348,7 +348,8 @@ function sectionCard(s, i, count) {
         <label class="field" style="max-width:110px">Play × times<input type="number" inputmode="numeric" min="2" max="16" data-sec="${i}" data-f="times" value="${esc(s.times)}" placeholder="2"></label>
         <label class="field">1st ending bars<input type="text" data-sec="${i}" data-f="ending1" data-chordbox inputmode="${keyboardHidden() ? 'none' : 'text'}" value="${esc(s.ending1)}" placeholder="e.g. B/A" ${NO_AUTO}></label>
         <label class="field">2nd ending bars<input type="text" data-sec="${i}" data-f="ending2" data-chordbox inputmode="${keyboardHidden() ? 'none' : 'text'}" value="${esc(s.ending2)}" placeholder="e.g. B" ${NO_AUTO}></label>
-      </div>` : ''}
+      </div>
+      <label class="check"><input type="checkbox" data-sec="${i}" data-f="keepEndings" ${s.keepEndings ? 'checked' : ''}> Keep both endings on one line (squeezes that line)</label>` : ''}
     <div class="row" style="margin-top:8px"><label class="field">Note under the first bar<input type="text" data-sec="${i}" data-f="note" value="${esc(s.note)}" placeholder="e.g. Cont. 8ths feel / and accents" autocomplete="off"></label></div>
     <div class="section-tools">
       <button class="btn small icon" data-act="sec-up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
