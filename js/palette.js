@@ -1,4 +1,4 @@
-import { prettyChord } from './abcgen.js';
+import { prettyChord, styleChord } from './abcgen.js';
 
 // Quick-entry chord pad shown while a chord box (bars / endings) is focused.
 // Buttons never take focus away from the box, so the caret stays put.
@@ -63,7 +63,8 @@ export function roots(key) {
 }
 
 const pretty = prettyChord;
-const MODS = ['m', '7', 'm7', 'maj7', 'sus4', 'sus2', '7sus4', 'add9', '6', '9', 'dim', 'aug'];
+const MODS = ['m', '7', 'm7', 'maj7', 'm7b5', 'dim7', 'sus4', 'sus2', '7sus4', 'add9', '6', '9', 'dim', 'aug'];
+const SHORT_LABEL = { m: '-', m7: '-7', maj7: 'Δ7', m7b5: 'ø7', dim7: '°7', dim: '°', aug: '+' };
 
 // ---------------------------------------------------------------- editing
 function ctx(field) {
@@ -129,7 +130,7 @@ function backspace(field) {
 }
 
 // ---------------------------------------------------------------- UI
-let pad, field, getKey, kbPref;
+let pad, field, getKey, getStyle, kbPref;
 
 function kbHidden() {
   if (kbPref != null) return kbPref;
@@ -152,6 +153,9 @@ function btn(label, act, val = '', sub = '', cls = '') {
 
 function draw() {
   const key = getKey();
+  const style = getStyle();
+  const show = (name) => pretty(styleChord(name, style));
+  const modLabel = (m) => (style === 'short' && SHORT_LABEL[m] ? SHORT_LABEL[m] : pretty(m));
   const { diatonic, extra } = keyChords(key);
   pad.innerHTML = `
     <div class="pk-row pk-tools">
@@ -166,9 +170,9 @@ function draw() {
       ${btn('Done', 'done', '', '', 'pk-done')}
     </div>
     <div class="pk-label">In ${pretty(key)}</div>
-    <div class="pk-row pk-key">${diatonic.map((c) => btn(pretty(c.name), 'chord', c.name, c.roman, 'pk-chord')).join('')}</div>
-    <div class="pk-row pk-key">${extra.map((c) => btn(pretty(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}</div>
-    <div class="pk-row pk-mods">${MODS.map((m) => btn(m, 'mod', m)).join('')}${btn('&lt;', 'tok', '<', 'cresc')}${btn('N.C.', 'tok', 'N.C.')}</div>
+    <div class="pk-row pk-key">${diatonic.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord')).join('')}</div>
+    <div class="pk-row pk-key">${extra.map((c) => btn(show(c.name), 'chord', c.name, c.roman, 'pk-chord pk-out')).join('')}${btn('/', 'slash', '', 'bass')}</div>
+    <div class="pk-row pk-mods">${MODS.map((m) => btn(modLabel(m), 'mod', m)).join('')}${btn('&lt;', 'tok', '<', 'cresc')}${btn('N.C.', 'tok', 'N.C.')}</div>
     <div class="pk-row pk-roots">${roots(key).map((r) => btn(pretty(r), 'chord', r, '', 'pk-root')).join('')}</div>`;
 }
 
@@ -194,8 +198,9 @@ function place() {
   document.body.style.paddingBottom = pad.offsetHeight + offset + 12 + 'px';
 }
 
-export function initPalette(keyGetter) {
+export function initPalette(keyGetter, styleGetter = () => 'standard') {
   getKey = keyGetter;
+  getStyle = styleGetter;
   pad = document.createElement('div');
   pad.className = 'chordpad';
   pad.hidden = true;

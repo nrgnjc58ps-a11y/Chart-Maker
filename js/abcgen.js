@@ -40,7 +40,42 @@ const KEYWORDS = {
 
 const RHYTHM_WORDS = { '8ths': 'eighths', eighths: 'eighths', quarters: 'quarters', slashes: 'slashes', whole: 'whole' };
 
-const CHORD_RE = /^(N\.?C\.?|[A-G](?:#|b|♯|♭)?[A-Za-z0-9+°ø#♯♭()\-^]*(?:\/[A-G](?:#|b|♯|♭)?)?)$/;
+const CHORD_RE = /^(N\.?C\.?|[A-G](?:#|b|♯|♭)?[A-Za-z0-9+°øØΔ△#♯♭()\-−^]*(?:\/[A-G](?:#|b|♯|♭)?)?)$/;
+
+export const CHORD_STYLES = {
+  standard: 'Standard (Cmaj7, Cm7, Cm7♭5, Cdim7)',
+  short: 'Shorthand (CΔ7, C-7, Cø7, C°7)',
+};
+
+// Accept shorthand as typed and store/transpose one spelling:
+// CΔ7 C^7 CM7 → Cmaj7 · C-7 → Cm7 · Cø → Cm7b5 · C°7 → Cdim7 · C+ → Caug
+export function canonicalChord(chord) {
+  const m = /^([A-G][#b]?)(.*?)(\/[A-G][#b]?)?$/.exec(chord);
+  if (!m) return chord;
+  let q = m[2].replace(/△/g, 'Δ').replace(/−/g, '-').replace(/Ø/g, 'ø');
+  q = q.replace(/^-/, 'm');
+  q = q.replace(/^m(?:Maj|maj|Δ|\^|M)7?/, 'm(maj7)');
+  if (/^(?:Δ|\^)/.test(q)) { const r = q.slice(1); q = 'maj' + (r === '' ? '7' : r); }
+  else if (/^Maj/.test(q)) q = 'maj' + q.slice(3);
+  else if (/^M(?=\d|$)/.test(q)) { const r = q.slice(1); q = 'maj' + (r === '' ? '7' : r); }
+  q = q.replace(/^ø7?/, 'm7b5').replace(/^°/, 'dim').replace(/^\+/, 'aug');
+  return m[1] + q + (m[3] || '');
+}
+
+// Print a (canonical) chord in the chosen style.
+export function styleChord(chord, style) {
+  if (style !== 'short') return chord;
+  const m = /^([A-G][#b]?)(.*?)(\/[A-G][#b]?)?$/.exec(chord);
+  if (!m) return chord;
+  let q = m[2];
+  if (/^m7b5/.test(q)) q = 'ø7' + q.slice(4);
+  else if (/^m\(maj7\)/.test(q)) q = '-Δ7' + q.slice(7);
+  else if (/^maj/.test(q)) q = 'Δ' + q.slice(3);
+  else if (/^m(?!aj)/.test(q)) q = '-' + q.slice(1);
+  else if (/^dim/.test(q)) q = '°' + q.slice(3);
+  else if (/^aug/.test(q)) q = '+' + q.slice(3);
+  return m[1] + q + (m[3] || '');
+}
 
 // Normalise "smart" punctuation that iPhone/iPad keyboards insert.
 export function normalise(text) {
@@ -91,7 +126,7 @@ export function parseBar(text) {
     } else if (tok === '.' || tok === '/' || tok === '-') {
       bar.beats.push(null);
     } else if (CHORD_RE.test(tok)) {
-      bar.beats.push(tok);
+      bar.beats.push(canonicalChord(tok));
     } else {
       bar.warnings.push(tok);
     }
@@ -208,7 +243,7 @@ const textNote = (pos, t) => `"${pos}${TEXT_MARK}${abcText(t)}"`;
 function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr) {
   const chordText = (c) => {
     tr.ord++;
-    return `"^${c.split(/\s+/).map((x) => prettyChord(transposeChord(x, tr.steps, tr.key))).join('  ')}"`;
+    return `"^${c.split(/\s+/).map((x) => prettyChord(styleChord(transposeChord(x, tr.steps, tr.key), tr.style))).join('  ')}"`;
   };
   const chords = placeChords(bar.beats, meter.beats);
   const startBits = extraStart + bar.startDecos.join('') + bar.above.map((t) => textNote('^', t)).join('');
@@ -392,7 +427,7 @@ function header(song, steps) {
 // pads[i]: extra spacing after the i-th chord label (the renderer works these out).
 export function songToAbc(song, steps = 0, pads = []) {
   const meter = meterInfo(song.time);
-  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, pads };
+  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, pads, style: song.chordStyle || 'standard' };
   const out = header(song, steps);
   const key = KEYS.includes(song.key) ? song.key : 'C';
   out.push(`K:${key}`, 'V:1 stem=up');
