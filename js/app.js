@@ -136,7 +136,7 @@ function listTopbar(kind) {
   const isSel = selecting === kind;
   const has = state.songs.length;
   const sel = has ? `<button class="tbtn" data-act="${isSel ? 'select-done' : 'select-start'}" data-kind="${kind}">${isSel ? 'Done' : 'Select'}</button>` : '';
-  const add = isSel ? '' : '<button class="tbtn icon-btn" data-act="settings" aria-label="Settings and backup">⚙︎</button><button class="tbtn primary" data-act="new-song">+ New</button>';
+  const add = isSel ? '' : '<button class="tbtn icon-btn" data-act="paste-song" aria-label="Paste a song copied from Audio Charter" title="Paste a song copied from Audio Charter">📋</button><button class="tbtn icon-btn" data-act="settings" aria-label="Settings and backup">⚙︎</button><button class="tbtn primary" data-act="new-song">+ New</button>';
   topbar({ title: isSel ? `${selected.size} selected` : 'Charts', left: sel, right: add });
 }
 
@@ -294,6 +294,27 @@ function bindSettings() {
       toast('That file isn’t a Chart Maker backup.');
     }
   });
+}
+
+// ---------- paste a song copied from Audio Charter ----------
+// Audio Charter's "Copy for Chart Maker" puts a backup-format song on the clipboard
+// ({ app: 'chart-maker', songs: [...] }). It's merged like Restore backup: a song with
+// the same id is updated, everything else is kept.
+async function pasteSong() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); }
+  catch { toast('Couldn’t read the clipboard. Allow Paste, or use ⚙︎ → Restore backup.', 3500); return; }
+  let data = null;
+  try { data = JSON.parse(text); } catch { data = null; }
+  const incoming = data && data.app === 'chart-maker' ? (data.songs || (data.song ? [data.song] : [])) : [];
+  if (!incoming.length) { toast('No song on the clipboard. In Audio Charter: Export → Copy for Chart Maker.', 3500); return; }
+  const updating = incoming.filter((s) => s && store.findSong(s.id)).length;
+  const r = store.importBackup(text);
+  if (!r.songs) { toast('That clipboard text isn’t a Chart Maker song.'); return; }
+  const what = r.songs === 1 ? `“${incoming[0].title || 'Untitled'}”` : `${r.songs} songs`;
+  toast(updating === r.songs ? `Updated ${what}` : `Added ${what}`);
+  if (r.songs === 1 && store.findSong(incoming[0].id)) navigate('/song/' + incoming[0].id);
+  else route();
 }
 
 // ---------- song editor ----------
@@ -791,6 +812,7 @@ document.addEventListener('click', (e) => {
       selecting = null; selected.clear(); route();
       break;
     case 'settings': settingsSheet(); break;
+    case 'paste-song': pasteSong(); break;
     case 'select-all': {
       const ids = state.songs.map((x) => x.id);
       const all = ids.every((id) => selected.has(id));

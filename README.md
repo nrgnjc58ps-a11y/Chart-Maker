@@ -23,6 +23,7 @@ A gig-chart maker for guitar that works on iPhone and iPad (or any browser). Typ
 - **Chord pad:** includes an altered row (♭5 ♯5 ♭9 ♯9 ♯11 ♭13 alt) that adds onto the chord you just tapped (G7 → G7♭9).
 - **Chord pad (all):** tap into a chord box and a pad appears with `|` for bar lines, the chords in the song's key (with roman numerals), common outside chords (♭VII, II, iv…), chord types (7, m7, sus4… tap again to undo), `/` for slash chords, and all 12 roots for anything else. On phones the keyboard stays hidden; tap ⌨ to type instead.
 - **Chord symbols:** choose Standard (Cmaj7, Cm7, Cm7♭5) or Shorthand (CΔ7, C-7, Cø7, C°7, C+) per song. Either style can be typed (`CM7`, `Cmaj7`, `CΔ7` = maj7; `CM`, `Cmaj`, `CΔ` = major; `Cmin`, `C-` = minor; `Cø`; `C°`; `C+`, `C+5`; `C5` power chord) and prints in the chosen style.
+- **From Audio Charter:** in Audio Charter tap *Export → Copy for Chart Maker*, then tap **📋** on the Charts screen here. The song is added (or updated, if you sent it before) and opens. *Restore backup* with an exported file works too.
 - **Transpose** with the − / + buttons. The key signature, chords and any written notes all move.
 - **PDF** → *Share / Save to Files / Print*, or use **Print** directly.
 
