@@ -1,6 +1,6 @@
 // Engraves songs with abcjs, lays the lines out on pages, and exports PDFs.
 import { arrangeSong } from './layout.js';
-import { songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FILL_MARK, TIMES_MARK, FONT_STYLES } from './abcgen.js';
+import { targetKey, songToAbc, transposeKeyName, prettyChord, meterInfo, TEXT_MARK, SIMILE_MARK, FILL_MARK, TIMES_MARK, FONT_STYLES } from './abcgen.js';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 export const PAPER = {
@@ -333,7 +333,8 @@ export function renderSong(typed, { paper: paperName = 'letter', transpose } = {
         staffwidth: Math.round(contentW / ZOOM) - 2,
         paddingleft: 0, paddingright: 0, paddingtop: 6, paddingbottom: 6,
         oneSvgPerLine: true,
-        visualTranspose: steps,
+        // Chart Maker writes the new key itself (with the spelling chosen); only raw ABC is moved by abcjs.
+        visualTranspose: raw ? steps : 0,
         add_classes: true,
       });
     } catch (e) {
@@ -419,7 +420,7 @@ export function renderSong(typed, { paper: paperName = 'letter', transpose } = {
     y += h;
   });
   host.innerHTML = '';
-  return { pages, warnings, abc, key: transposeKeyName(song.key, steps), layoutNote };
+  return { pages, warnings, abc, key: raw ? transposeKeyName(song.key, steps) : targetKey(song.key, steps, song.keyPref), layoutNote };
 }
 
 // ---------- PDF ----------

@@ -15,7 +15,7 @@ export const LAYOUTS = {
 };
 
 const norm = (s) => String(s ?? '').replace(/\s+/g, ' ').trim();
-const keyOf = (s) => JSON.stringify([norm(s.label).toLowerCase(), norm(s.bars), !!s.repeat, s.repeat ? norm(s.times) : '', s.repeat ? norm(s.ending1) : '', s.repeat ? norm(s.ending2) : '', s.rhythm || '', !!s.keepEndings]);
+const keyOf = (s) => JSON.stringify([norm(s.label).toLowerCase(), parseInt(s.shift, 10) || 0, s.shiftKey || '', norm(s.bars), !!s.repeat, s.repeat ? norm(s.times) : '', s.repeat ? norm(s.ending1) : '', s.repeat ? norm(s.ending2) : '', s.rhythm || '', !!s.keepEndings]);
 const barCount = (s) => splitBarsEx(s.bars).length + (s.repeat ? splitBarsEx(s.ending1).length + splitBarsEx(s.ending2).length : 0);
 const copy = (s) => ({ ...s, linkTo: undefined, pageBreak: false });
 
@@ -69,7 +69,7 @@ function addEnd(sec, word) {
 
 // The music of a section, ignoring how many times a plain repeat is played.
 const hasEndings = (s) => s.repeat && (norm(s.ending1) || norm(s.ending2));
-const musicKey = (s) => JSON.stringify([norm(s.bars), hasEndings(s) ? [norm(s.ending1), norm(s.ending2), norm(s.times)] : '', s.rhythm || '', !!s.keepEndings]);
+const musicKey = (s) => JSON.stringify([parseInt(s.shift, 10) || 0, s.shiftKey || '', norm(s.bars), hasEndings(s) ? [norm(s.ending1), norm(s.ending2), norm(s.times)] : '', s.rhythm || '', !!s.keepEndings]);
 const plays = (s) => (s.repeat && !hasEndings(s) ? Math.max(2, parseInt(s.times, 10) || 2) : 1);
 
 function formLayout(song) {

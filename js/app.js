@@ -1,6 +1,11 @@
 import * as store from './store.js';
-import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, resolveSection, splitBarsEx, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
+import { RHYTHMS, KEYS, FONT_STYLES, TUNINGS, CHORD_STYLES, CHORD_SIZES, resolveSection, splitBarsEx, targetKey, sectionKey, keySpellings, transposeKeyName as keyName, prettyChord, songToAbc } from './abcgen.js';
+// The key a song is shown in, with the sharps/flats spelling chosen for it.
+const shownKey = (song) => targetKey(song.key, song.transpose || 0, song.keyPref);
 const transposeKeyName = (k, n) => prettyChord(keyName(k, n));
+const keyText = (k) => prettyChord(k.replace(/m$/, '')) + (/m$/.test(k) ? ' minor' : ' major');
+const PC_OF = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const pcOf = (k) => { const m = /^([A-G])([#b]?)/.exec(k) || [0, 'C', '']; return (PC_OF[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12) % 12; };
 import { renderSong, pagesToPdf, loadFonts, setChordSize, PAPER } from './render.js';
 import { initPalette, refreshPalette, keyboardHidden } from './palette.js';
 import { LAYOUTS } from './layout.js';
@@ -81,6 +86,12 @@ async function saveFile(blob, filename, { preferShare = true } = {}) {
   return true;
 }
 
+function transposeInfo(song) {
+  const t = song.transpose || 0;
+  if (t) return `${stepsLabel(t)} (written in ${prettyChord(song.key)})`;
+  const k = shownKey(song);
+  return k !== song.key ? `Same notes, spelled in ${prettyChord(k)} (written in ${prettyChord(song.key)})` : 'Original key';
+}
 function stepsLabel(n) {
   return n === 0 ? 'Original key' : `${n > 0 ? '+' : '−'}${Math.abs(n)} semitone${Math.abs(n) === 1 ? '' : 's'}`;
 }
@@ -156,7 +167,7 @@ function viewSongs(filter = '') {
     const shown = songs.filter((s) => !ql || `${s.title} ${s.composer}`.toLowerCase().includes(ql));
     const row = (s) => `
         <div class="grow"><div class="title">${esc(s.title || 'Untitled')}</div><div class="meta">${esc(s.composer || '')}${s.tempo ? ` · ${esc(s.tempo)} bpm` : ''}</div></div>
-        <span class="pill">${esc(transposeKeyName(s.key, s.transpose || 0))}</span>`;
+        <span class="pill">${esc(prettyChord(shownKey(s)))}</span>`;
     list.innerHTML = shown.length ? shown.map((s) => (selecting === 'songs'
       ? `<li><label class="list-item select-row"><input type="checkbox" data-select="${s.id}" ${selected.has(s.id) ? 'checked' : ''}>${row(s)}</label></li>`
       : `<li><a class="list-item" href="#/song/${s.id}">${row(s)}<span class="chev" aria-hidden="true">›</span></a></li>`)).join('')
@@ -367,14 +378,14 @@ function drawEditPane(song) {
       <h2>Transpose</h2>
       <div class="transpose">
         <button class="btn icon" data-act="tr-down" aria-label="Down a semitone">−</button>
-        <span class="keyshow" id="keyshow">${esc(transposeKeyName(song.key, t))}</span>
+        <select class="keyshow" id="keyshow" data-act-change="tr-to" aria-label="Transpose to">${transposeOptions(song)}</select>
         <button class="btn icon" data-act="tr-up" aria-label="Up a semitone">+</button>
-        <span class="muted small grow" id="trinfo">${stepsLabel(t)}${t ? ` (written in ${esc(song.key)})` : ''}</span>
-        <button class="btn small" data-act="tr-reset" ${t ? '' : 'disabled'}>Reset</button>
+        <span class="muted small grow" id="trinfo">${esc(transposeInfo(song))}</span>
+        <button class="btn small" data-act="tr-reset" ${t || song.keyPref ? '' : 'disabled'}>Reset</button>
       </div>
     </div>
 
-    ${song.useRaw ? '' : song.sections.map((s, i) => (s.linkTo ? linkedCard(song, s, i) : sectionCard(s, i, song.sections.length))).join('')}
+    ${song.useRaw ? '' : song.sections.map((s, i) => (s.linkTo ? linkedCard(song, s, i) : sectionCard(s, i, song.sections.length, song))).join('')}
 
     ${song.useRaw ? '' : `<div class="card">
       <div id="repeat-chips">${repeatChips(song)}</div>
@@ -426,6 +437,7 @@ function linkedCard(song, s, i) {
       <div class="small muted">${src ? `Same as section ${n} · ${bars} bar${bars === 1 ? '' : 's'}${r.repeat ? ' · repeated' : ''}. Changes to section ${n} show here too.` : 'The original section was deleted.'}</div></div>
     </div>
     <div class="linked-bars">${esc(r.bars)}</div>
+    <div class="row" style="margin-top:8px"><label class="field">Key change for this one<select data-sec="${i}" data-f="keyChange">${keyChangeOptions(song, s)}</select></label></div>
     <div class="row"><label class="check"><input type="checkbox" data-sec="${i}" data-f="pageBreak" ${s.pageBreak ? 'checked' : ''}> Start on a new page</label></div>
     <div class="section-tools">
       <button class="btn small icon" data-act="sec-up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
@@ -437,7 +449,7 @@ function linkedCard(song, s, i) {
   </div>`;
 }
 
-function sectionCard(s, i, count) {
+function sectionCard(s, i, count, song) {
   const sel = (field, opts) => `<select data-sec="${i}" data-f="${field}">${opts}</select>`;
   return `
   <div class="card section-card" data-index="${i}">
@@ -461,7 +473,8 @@ function sectionCard(s, i, count) {
         <label class="field">2nd ending bars<input type="text" data-sec="${i}" data-f="ending2" data-chordbox inputmode="${keyboardHidden() ? 'none' : 'text'}" value="${esc(s.ending2)}" placeholder="e.g. B" ${NO_AUTO}></label>
       </div>
       <label class="check"><input type="checkbox" data-sec="${i}" data-f="keepEndings" ${s.keepEndings ? 'checked' : ''}> Keep both endings on one line (squeezes that line)</label>` : ''}
-    <div class="row" style="margin-top:8px"><label class="field">Note under the first bar<input type="text" data-sec="${i}" data-f="note" value="${esc(s.note)}" placeholder="e.g. Cont. 8ths feel / and accents" autocomplete="off"></label></div>
+    <div class="row" style="margin-top:8px"><label class="field">Key change (moves this section's chords)<select data-sec="${i}" data-f="keyChange">${keyChangeOptions(song, s)}</select></label></div>
+    <div class="row" style="margin-top:8px"><label class="field">Note above the first bar<input type="text" data-sec="${i}" data-f="note" value="${esc(s.note)}" placeholder="e.g. Cont. 8ths feel / and accents" autocomplete="off"></label></div>
     <div class="section-tools">
       <button class="btn small icon" data-act="sec-up" data-i="${i}" ${i === 0 ? 'disabled' : ''} aria-label="Move up">↑</button>
       <button class="btn small icon" data-act="sec-down" data-i="${i}" ${i === count - 1 ? 'disabled' : ''} aria-label="Move down">↓</button>
@@ -526,12 +539,57 @@ function renderPreview(song, immediate = true) {
   if (immediate) go(); else previewTimer = setTimeout(go, 350);
 }
 
+// Every key of the song's kind (major or minor), with both spellings where there are two.
+function transposeOptions(song) {
+  const minor = /m$/.test(song.key);
+  const now = shownKey(song);
+  return KEYS.filter((k) => /m$/.test(k) === minor).map((k) => `<option value="${k}" ${k === now ? 'selected' : ''}>${esc(prettyChord(k))}</option>`).join('');
+}
+
+// "Key change" choices for a section, named in the key the song is shown in.
+function keyChangeOptions(song, sec) {
+  const base = shownKey(song);
+  const shift = parseInt(sec.shift, 10) || 0;
+  const cur = shift ? sectionKey(base, shift, sec.shiftKey) : '';
+  let html = `<option value="0|" ${shift ? '' : 'selected'}>No key change</option>`;
+  for (const n of [1, 2, 3, 4, 5, 6, -1, -2, -3, -4, -5]) {
+    keySpellings(keyName(base, n)).forEach((k) => {
+      const label = `${keyText(k)} (${n > 0 ? 'up' : 'down'} ${Math.abs(n)})`;
+      html += `<option value="${n}|${k}" ${shift === n && cur === k ? 'selected' : ''}>${esc(label)}</option>`;
+    });
+  }
+  return html;
+}
+
 function updateTransposeUi(song) {
   const t = song.transpose || 0;
-  $('#keyshow').textContent = transposeKeyName(song.key, t);
-  $('#trinfo').textContent = stepsLabel(t) + (t ? ` (written in ${song.key})` : '');
-  $('[data-act="tr-reset"]').disabled = !t;
+  $('#keyshow').innerHTML = transposeOptions(song);
+  $('#trinfo').textContent = transposeInfo(song);
+  $('[data-act="tr-reset"]').disabled = !t && !song.keyPref;
 }
+
+function afterTranspose(song) {
+  song.updated = Date.now();
+  store.save();
+  updateTransposeUi(song);
+  // Section key-change choices are named in the key shown, so refresh them when it moves.
+  $$('select[data-f="keyChange"]').forEach((sel) => {
+    const sec = song.sections[+sel.dataset.sec];
+    if (sec) sel.innerHTML = keyChangeOptions(song, sec);
+  });
+  renderPreview(song);
+}
+
+// "Transpose to" a key picked from the list (sets the spelling too: F# or Gb).
+app.addEventListener('change', (e) => {
+  if (e.target.id !== 'keyshow') return;
+  const song = currentSong();
+  if (!song) return;
+  const k = e.target.value;
+  song.transpose = wrapSteps(pcOf(k) - pcOf(song.key));
+  song.keyPref = k;
+  afterTranspose(song);
+});
 
 // Field edits (song + sections). Checkboxes use "change" (older iOS), everything else "input".
 const onSongField = (e) => {
@@ -543,11 +601,16 @@ const onSongField = (e) => {
     song[tgt.dataset.song] = tgt.type === 'checkbox' ? tgt.checked : tgt.value;
     if (tgt.dataset.song === 'tuning') drawEditPane(song);
     if (tgt.dataset.song === 'title') $('#top-title').textContent = tgt.value || 'New song';
-    if (tgt.dataset.song === 'key' || tgt.dataset.song === 'chordStyle') { updateTransposeUi(song); refreshPalette(); }
+    if (tgt.dataset.song === 'key') { song.keyPref = ''; drawEditPane(song); refreshPalette(); }
+    if (tgt.dataset.song === 'chordStyle') { updateTransposeUi(song); refreshPalette(); }
   } else if (tgt.dataset.sec != null) {
     const sec = song.sections[+tgt.dataset.sec];
     if (!sec) return;
-    if (tgt.type === 'checkbox') sec[tgt.dataset.f] = tgt.checked;
+    if (tgt.dataset.f === 'keyChange') {
+      const [n, k] = tgt.value.split('|');
+      sec.shift = parseInt(n, 10) || 0;
+      sec.shiftKey = sec.shift ? k : '';
+    } else if (tgt.type === 'checkbox') sec[tgt.dataset.f] = tgt.checked;
     else sec[tgt.dataset.f] = tgt.value;
     if (tgt.dataset.f === 'repeat') drawEditPane(song);
     if (tgt.dataset.f === 'bars' || tgt.dataset.f === 'label') {
@@ -676,9 +739,8 @@ document.addEventListener('click', (e) => {
     case 'tr-up': case 'tr-down': case 'tr-reset':
       if (!song) break;
       song.transpose = act === 'tr-reset' ? 0 : wrapSteps((song.transpose || 0) + (act === 'tr-up' ? 1 : -1));
-      store.save();
-      updateTransposeUi(song);
-      renderPreview(song);
+      song.keyPref = '';
+      afterTranspose(song);
       break;
     case 'add-sec': {
       const s = store.newSection(btn.dataset.name);
@@ -742,7 +804,7 @@ document.addEventListener('click', (e) => {
       store.save(); drawEditPane(song); renderPreview(song);
       break;
     case 'song-pdf':
-      makePdf(() => renderSong(song, { paper: state.prefs.paper }).pages, `${song.title || 'Chart'}${song.transpose ? ` - ${keyName(song.key, song.transpose)}` : ''}`);
+      makePdf(() => renderSong(song, { paper: state.prefs.paper }).pages, `${song.title || 'Chart'}${song.transpose || song.keyPref ? ` - ${shownKey(song)}` : ''}`);
       break;
     case 'song-print':
       printPages(renderSong(song, { paper: state.prefs.paper }).pages);

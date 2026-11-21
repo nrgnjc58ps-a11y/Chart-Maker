@@ -235,13 +235,34 @@ function moveNote(note, steps, flats) {
   return (flats ? FLATS : SHARPS)[n];
 }
 
+// Move a note name by an interval: `letters` scale steps and `steps` semitones, so the
+// letter names follow the key (Eb up to the key of C# gives C#, not Db). Odd results
+// (B#, Fb, double sharps…) fall back to the plain sharp/flat name unless the new key has them.
+function moveLetter(note, steps, letters, targetKey) {
+  const m = /^([A-G])(#|b)?$/.exec(note);
+  if (!m) return note;
+  const li = LETTERS.indexOf(m[1]);
+  const pc = (NATURAL[li] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12) % 12;
+  const nli = (((li + letters) % 7) + 7) % 7;
+  let alter = (((pc + steps - NATURAL[nli]) % 12) + 12) % 12;
+  if (alter > 6) alter -= 12;
+  const sig = keySignature(targetKey);
+  const odd = Math.abs(alter) > 1 || ((LETTERS[nli] === 'B' || LETTERS[nli] === 'E') && alter === 1) || ((LETTERS[nli] === 'C' || LETTERS[nli] === 'F') && alter === -1);
+  if (odd && sig[LETTERS[nli]] !== alter) return moveNote(note, steps, FLAT_KEYS.has(targetKey));
+  return LETTERS[nli] + (alter === 1 ? '#' : alter === -1 ? 'b' : '');
+}
+
 // Transpose one chord symbol, e.g. "C#m7/G#" up 1 → "Dm7/A".
-export function transposeChord(chord, steps, targetKey) {
-  if (!steps || /^N\.?C/.test(chord)) return chord;
+// With `letters` (scale steps) the spelling follows the new key; without, sharps/flats by key.
+export function transposeChord(chord, steps, targetKey, letters) {
+  if ((!steps && !letters) || /^N\.?C/.test(chord)) return chord;
   const m = /^([A-G][#b]?)(.*?)(?:\/([A-G][#b]?))?$/.exec(chord);
   if (!m) return chord;
-  const flats = FLAT_KEYS.has(targetKey);
-  return moveNote(m[1], steps, flats) + m[2] + (m[3] ? '/' + moveNote(m[3], steps, flats) : '');
+  if (letters == null) {
+    const flats = FLAT_KEYS.has(targetKey);
+    return moveNote(m[1], steps, flats) + m[2] + (m[3] ? '/' + moveNote(m[3], steps, flats) : '');
+  }
+  return moveLetter(m[1], steps, letters, targetKey) + m[2] + (m[3] ? '/' + moveLetter(m[3], steps, letters, targetKey) : '');
 }
 
 // Pretty sharps/flats for printing: C#m7b5 → C♯m7♭5
@@ -260,7 +281,7 @@ const textNote = (pos, t) => `"${pos}${TEXT_MARK}${abcText(t)}"`;
 function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr, opts = {}) {
   const chordText = (c) => {
     tr.ord++;
-    return `"^${c.replace(/(^|\s)\^/g, '$1').split(/\s+/).map((x) => prettyChord(styleChord(transposeChord(x, tr.steps, tr.key), tr.style))).join('  ')}"`;
+    return `"^${c.replace(/(^|\s)\^/g, '$1').split(/\s+/).map((x) => prettyChord(styleChord(transposeChord(x, tr.steps, tr.key, tr.letters), tr.style))).join('  ')}"`;
   };
   const chords = placeChords(bar.beats, meter.beats);
   const startBits = extraStart + bar.startDecos.join('') + bar.above.map((t) => textNote('^', t)).join('');
@@ -270,7 +291,7 @@ function barToAbc(bar, meter, defaultRhythm, extraStart, extraEnd, tr, opts = {}
   if (bar.custom != null) {
     // Real notation: user writes ABC with eighth note = 1.
     const firstChord = bar.beats.find((c) => c);
-    const body = bar.custom || 'z8';
+    const body = tr.letters || tr.steps ? transposeAbc(bar.custom || 'z8', tr) : (bar.custom || 'z8');
     return `[L:1/8]${startBits}${endBits}${firstChord ? chordText(firstChord) : ''}${body}[L:1/16]`;
   }
 
@@ -408,8 +429,104 @@ const KEY_INDEX = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#'
 const NEW_KEY = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const NEW_KEY_MINOR = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'Bb', 'B'];
 
-export const KEYS = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B',
-  'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Am', 'Bbm', 'Bm'];
+// Every key signature: all 15 major and 15 minor keys (C#/Db, F#/Gb, B/Cb … both ways).
+export const KEYS = ['C', 'C#', 'Db', 'D', 'Eb', 'E', 'F', 'F#', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B', 'Cb',
+  'Cm', 'C#m', 'Dm', 'D#m', 'Ebm', 'Em', 'Fm', 'F#m', 'Gm', 'G#m', 'Abm', 'Am', 'A#m', 'Bbm', 'Bm'];
+
+const LETTERS = 'CDEFGAB';
+const NATURAL = [0, 2, 4, 5, 7, 9, 11];
+// Sharps (+) or flats (−) in each key signature.
+const SIG_COUNT = {
+  C: 0, G: 1, D: 2, A: 3, E: 4, B: 5, 'F#': 6, 'C#': 7, F: -1, Bb: -2, Eb: -3, Ab: -4, Db: -5, Gb: -6, Cb: -7,
+  Am: 0, Em: 1, Bm: 2, 'F#m': 3, 'C#m': 4, 'G#m': 5, 'D#m': 6, 'A#m': 7, Dm: -1, Gm: -2, Cm: -3, Fm: -4, Bbm: -5, Ebm: -6, Abm: -7,
+};
+export const keySigCount = (key) => SIG_COUNT[key] ?? 0;
+// {letter: -1 | 0 | 1} for a key signature.
+function keySignature(key) {
+  const n = SIG_COUNT[key] ?? 0;
+  const sig = { C: 0, D: 0, E: 0, F: 0, G: 0, A: 0, B: 0 };
+  if (n > 0) 'FCGDAEB'.slice(0, n).split('').forEach((l) => { sig[l] = 1; });
+  if (n < 0) 'BEADGCF'.slice(0, -n).split('').forEach((l) => { sig[l] = -1; });
+  return sig;
+}
+const keyParts = (key) => {
+  const m = /^([A-G])([#b]?)(m?)$/.exec(key || 'C') || [0, 'C', '', ''];
+  const li = LETTERS.indexOf(m[1]);
+  return { li, pc: (NATURAL[li] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + 12) % 12, minor: !!m[3] };
+};
+// The other names for the same key ("F#" → ["F#", "Gb"]).
+export function keySpellings(key) {
+  const k = keyParts(key);
+  return KEYS.filter((x) => { const p = keyParts(x); return p.pc === k.pc && p.minor === k.minor; });
+}
+// The key `steps` semitones from `key`, spelled the way the person chose when that
+// spelling fits, otherwise the usual way.
+export function targetKey(key, steps, prefer) {
+  const k = KEYS.includes(key) ? key : 'C';
+  const def = steps % 12 === 0 ? k : transposeKeyName(k, steps); // untransposed: exactly as written
+  return prefer && keySpellings(def).includes(prefer) ? prefer : def;
+}
+// The key of a section moved `shift` semitones from the song's (printed) key: the spelling
+// chosen for it when that fits, otherwise the one that matches the song's sharps or flats.
+export function sectionKey(songKey, shift, prefer) {
+  if (!shift) return songKey;
+  const options = keySpellings(transposeKeyName(songKey, shift));
+  if (options.includes(prefer)) return prefer;
+  const flat = keySigCount(songKey) < 0;
+  return options.find((k) => (flat ? keySigCount(k) <= 0 : keySigCount(k) >= 0)) || options[0];
+}
+
+// Scale steps between two key names, in the direction of `steps` (for letter spelling).
+export function letterShift(fromKey, toKey, steps) {
+  let d = ((keyParts(toKey).li - keyParts(fromKey).li) % 7 + 7) % 7;
+  if (steps < 0 && d > 0) d -= 7;
+  else if (steps === 0 && d > 3) d -= 7;
+  return d;
+}
+
+// Real notation ({…} bars) moved to a new key: same letters-and-semitones rule as the chords,
+// accidentals written against the new key signature.
+function transposeAbc(body, tr) {
+  const steps = tr.steps || 0;
+  const letters = tr.letters ?? 0;
+  const src = keySignature(tr.fromKey), dst = keySignature(tr.key);
+  const inState = {}, outState = {};
+  const ACCS = { '^^': 2, '^': 1, '=': 0, '_': -1, '__': -2 };
+  const WRITE = { 2: '^^', 1: '^', 0: '=', '-1': '_', '-2': '__' };
+  let out = '', i = 0;
+  while (i < body.length) {
+    const ch = body[i];
+    // Leave chord names, decorations and inline fields alone.
+    const close = ch === '"' ? '"' : ch === '!' ? '!' : ch === '[' && /^\[[A-Za-z]:/.test(body.slice(i)) ? ']' : null;
+    if (close) {
+      const j = body.indexOf(close, i + 1);
+      const end = j < 0 ? body.length : j + 1;
+      out += body.slice(i, end); i = end; continue;
+    }
+    if (ch === '|') { Object.keys(inState).forEach((k) => delete inState[k]); Object.keys(outState).forEach((k) => delete outState[k]); }
+    const m = /^(\^\^|\^|__|_|=)?([A-Ga-g])([,']*)/.exec(body.slice(i));
+    if (!m) { out += ch; i++; continue; }
+    const upper = m[2].toUpperCase();
+    const li = LETTERS.indexOf(upper);
+    let oct = m[2] === upper ? 4 : 5;
+    for (const c of m[3]) oct += c === "'" ? 1 : -1;
+    const pos = oct * 7 + li;
+    let alter;
+    if (m[1] != null) { alter = ACCS[m[1]]; inState[pos] = alter; } else alter = inState[pos] ?? src[upper];
+    const abs = oct * 12 + NATURAL[li] + alter + steps;
+    const npos = pos + letters;
+    const nli = ((npos % 7) + 7) % 7, noct = Math.floor(npos / 7);
+    let nalter = abs - (noct * 12 + NATURAL[nli]);
+    if (Math.abs(nalter) > 2) nalter = Math.sign(nalter) * 2;
+    const implied = outState[npos] ?? dst[LETTERS[nli]];
+    let acc = '';
+    if (nalter !== implied) { acc = WRITE[nalter]; outState[npos] = nalter; }
+    const letter = noct >= 5 ? LETTERS[nli].toLowerCase() + "'".repeat(noct - 5) : LETTERS[nli] + ','.repeat(Math.max(0, 4 - noct));
+    out += acc + letter;
+    i += m[0].length;
+  }
+  return out;
+}
 
 // Same spelling rules abcjs uses, so the label matches the printed key signature.
 export function transposeKeyName(key, steps) {
@@ -464,7 +581,7 @@ export function keyLabel(key) {
 // The line printed above the first system: "Key: G major · Capo 2 · Drop D tuning"
 export function infoLine(song, steps = 0) {
   const bits = [];
-  if (song.showKey !== false) bits.push('Key: ' + keyLabel(transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps)));
+  if (song.showKey !== false) bits.push('Key: ' + keyLabel(targetKey(song.key, steps, song.keyPref)));
   const capo = parseInt(song.capo, 10);
   if (capo > 0) bits.push(`Capo ${capo}`);
   const t = TUNINGS[song.tuning];
@@ -514,16 +631,18 @@ function header(song, steps) {
 export function resolveSection(song, sec) {
   if (!sec.linkTo) return sec;
   const src = (song.sections || []).find((x) => x.id === sec.linkTo && !x.linkTo);
-  return src ? { ...src, id: sec.id, linkTo: sec.linkTo, pageBreak: !!sec.pageBreak } : sec;
+  return src ? { ...src, id: sec.id, linkTo: sec.linkTo, pageBreak: !!sec.pageBreak, shift: sec.shift || 0, shiftKey: sec.shiftKey || '' } : sec;
 }
 
 // pads[i]: extra spacing after the i-th chord label (the renderer works these out).
 export function songToAbc(song, steps = 0, pads = []) {
   const meter = meterInfo(song.time);
-  const tr = { steps, key: transposeKeyName(KEYS.includes(song.key) ? song.key : 'C', steps), ord: 0, bar: 1, pads, style: song.chordStyle || 'short' };
+  const written = KEYS.includes(song.key) ? song.key : 'C';
+  const songKey = targetKey(written, steps, song.keyPref);
+  const tr = { steps, key: songKey, fromKey: written, letters: letterShift(written, songKey, steps), ord: 0, bar: 1, pads, style: song.chordStyle || 'short' };
   const out = header(song, steps);
-  const key = KEYS.includes(song.key) ? song.key : 'C';
-  out.push(`K:${key}`, 'V:1 stem=up');
+  out.push(`K:${songKey}`, 'V:1 stem=up');
+  let keyNow = songKey;
   const lineSections = [];
   const warnings = [];
   const sections = (song.sections || []).map((s, idx) => ({ ...resolveSection(song, s), _idx: idx }))
@@ -531,6 +650,15 @@ export function songToAbc(song, steps = 0, pads = []) {
 
   sections.forEach((sec, si) => {
     const isLast = si === sections.length - 1;
+    // Key change for this section ("last chorus up a tone"): chords, key signature and any
+    // written notes move by the same interval. The spelling follows the person's choice
+    // when it fits, otherwise matches the song's sharps or flats.
+    const shift = parseInt(sec.shift, 10) || 0;
+    const secKey = sectionKey(songKey, shift, sec.shiftKey);
+    tr.key = secKey;
+    tr.steps = steps + shift;
+    tr.letters = letterShift(written, secKey, steps + shift);
+    if (secKey !== keyNow) { out.push(`K:${secKey}`); keyNow = secKey; }
     const main = barsOf(sec.bars);
     const repeat = !!sec.repeat;
     const end1 = repeat ? barsOf(sec.ending1) : [];
@@ -578,7 +706,9 @@ export function songToAbc(song, steps = 0, pads = []) {
     if (isLast && end2.length) lastItem.after = '|]';
 
     // Note under the first bar.
-    if (sec.note) items[0].extraStart = textNote('^', sec.note);
+    const keyNote = shift ? `Key: ${keyLabel(secKey)}` : '';
+    const notes = [keyNote, sec.note].filter(Boolean).join('  ·  ');
+    if (notes) items[0].extraStart = textNote('^', notes);
 
     // Line breaks: chunk by bars-per-line, so every line keeps the 4-bar grid. A lone
     // 2nd ending starts the next line, unless the section asks to keep endings together.
